@@ -34,6 +34,21 @@ class FoosballEnv(gym.Env):
         foosball_urdf_path = os.path.join(os.getcwd(), 'foosball', 'foosball.urdf')
         self.table_id = p.loadURDF(foosball_urdf_path, useFixedBase=1)
 
+        # Change colors for better visualization
+        p.changeVisualShape(self.table_id, -1, rgbaColor=[0.2, 0.6, 0.2, 1]) # Green Table
+        team1_color = [1, 0, 0, 1]  # Red
+        team2_color = [0, 0, 1, 1]  # Blue
+
+        for i in range(p.getNumJoints(self.table_id)):
+            joint_info = p.getJointInfo(self.table_id, i)
+            link_name = joint_info[12].decode('UTF-8')
+
+            if '_vir' not in link_name:
+                if '1' in link_name:
+                    p.changeVisualShape(self.table_id, i, rgbaColor=team1_color)
+                elif '2' in link_name:
+                    p.changeVisualShape(self.table_id, i, rgbaColor=team2_color)
+
         # Get table height
         table_aabb = p.getAABB(self.table_id, -1)
         table_height = table_aabb[1][2]
@@ -71,6 +86,11 @@ class FoosballEnv(gym.Env):
 
         obs = self._get_obs()
         self.prev_ball_dist_to_goal = np.linalg.norm(obs[0:2] - [self.opponent_goal_x, 0])
+        
+        # Stuck ball detection
+        self.stuck_counter = 0
+        self.last_ball_pos = obs[0:3]
+        
         return obs, {}
 
     def _get_obs(self):
@@ -121,7 +141,21 @@ class FoosballEnv(gym.Env):
             terminated = True
 
 
+        # Stuck ball detection
+        dist_moved = np.linalg.norm(ball_pos - self.last_ball_pos)
+        self.last_ball_pos = ball_pos
+        
+        if dist_moved < 0.001: # Check if ball moved less than 1mm
+            self.stuck_counter += 1
+        else:
+            self.stuck_counter = 0
+            
         truncated = False
+        if self.stuck_counter > 240: # If stuck for 240 steps (1 second)
+            reward -= 10 # Penalty for getting stuck
+            truncated = True
+            print("Ball is stuck, truncating episode.")
+        
         info = {}
         
         return observation, reward, terminated, truncated, info
