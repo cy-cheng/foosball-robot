@@ -145,13 +145,13 @@ class FoosballEnv(gym.Env):
         dist_moved = np.linalg.norm(ball_pos - self.last_ball_pos)
         self.last_ball_pos = ball_pos
         
-        if dist_moved < 0.001: # Check if ball moved less than 1mm
+        if dist_moved < 0.0001: # Check if ball moved less than 1mm
             self.stuck_counter += 1
         else:
             self.stuck_counter = 0
             
         truncated = False
-        if self.stuck_counter > 240: # If stuck for 240 steps (1 second)
+        if self.stuck_counter > 2400: # If stuck for 240 steps (1 second)
             reward -= 10 # Penalty for getting stuck
             truncated = True
             print("Ball is stuck, truncating episode.")

@@ -4,7 +4,7 @@ from stable_baselines3.common.callbacks import CheckpointCallback
 from foosball_env import FoosballEnv
 
 # Create the environment
-env = FoosballEnv(gui=True)
+env = FoosballEnv(gui=False)
 
 # Checkpoint callback
 checkpoint_callback = CheckpointCallback(save_freq=1000, save_path='./logs/',
@@ -14,7 +14,7 @@ checkpoint_callback = CheckpointCallback(save_freq=1000, save_path='./logs/',
 model = PPO('MlpPolicy', env, verbose=1, device='cpu')
 
 # Train the agent
-model.learn(total_timesteps=100000, callback=checkpoint_callback)
+model.learn(total_timesteps=10000000, callback=checkpoint_callback)
 
 # Save the agent
 model.save("ppo_foosball")
