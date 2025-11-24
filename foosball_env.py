@@ -18,6 +18,9 @@ class FoosballEnv(gym.Env):
         self.action_space = spaces.Box(low=-1, high=1, shape=(16,), dtype=np.float32)
         self.observation_space = spaces.Box(low=-np.inf, high=np.inf, shape=(38,), dtype=np.float32)
         
+        self.stuck_ball_counter = 0
+        self.stuck_ball_threshold = 240 * 5 # 5 seconds
+        
         self.reset()
 
     def reset(self, seed=None, options=None):
@@ -90,6 +93,7 @@ class FoosballEnv(gym.Env):
         self.last_ball_pos = obs[0:3]
         
         self.ball_in_play = False
+        self.stuck_ball_counter = 0
         
         return obs, {}
 
@@ -135,26 +139,13 @@ class FoosballEnv(gym.Env):
         reward_dist = self.prev_ball_dist_to_goal - dist_to_goal
         self.prev_ball_dist_to_goal = dist_to_goal
         
-        # 2. Penalty for ball being near own goal
-        dist_to_own_goal = np.linalg.norm(ball_pos[0:2] - [self.own_goal_x, 0])
-        reward_near_own_goal = -1.0 / (dist_to_own_goal + 1e-6)
-
-        # 3. Reward for ball being near opponent's goal
-        reward_near_opponent_goal = 1.0 / (dist_to_goal + 1e-6)
-
-        # 4. Reward for ball speed
-        ball_speed_reward = np.linalg.norm(ball_vel)
-
-        # 5. Control penalty
+        # 2. Control penalty
         reward_ctrl = -np.mean(np.square(action))
 
         # Total reward
         reward = (
             reward_dist + 
-            0.01 * reward_near_own_goal + 
-            0.01 * reward_near_opponent_goal +
-            0.01 * ball_speed_reward + 
-            0.001 * reward_ctrl
+            0.1 * reward_ctrl
         )
 
         # Termination condition
@@ -181,9 +172,16 @@ class FoosballEnv(gym.Env):
         self.last_ball_pos = ball_pos
         
         if dist_moved < 0.0001: # Check if ball moved less than 1mm
-            reward -= 0.01 # Small penalty for each step the ball is stuck
-        
+            self.stuck_ball_counter += 1
+        else:
+            self.stuck_ball_counter = 0
+
         truncated = False
+
+        if self.stuck_ball_counter > self.stuck_ball_threshold:
+            reward = -10 # Penalty for getting the ball stuck
+            truncated = True
+            print("Ball is stuck, truncating episode.")
         
         info = {}
         
