@@ -51,11 +51,11 @@ class FoosballEnv(gym.Env):
 
         # Get table height
         table_aabb = p.getAABB(self.table_id, -1)
-        table_height = table_aabb[1][2]
+        self.table_height = table_aabb[1][2]
 
         # Load ball
         ball_urdf_path = os.path.join(os.getcwd(), 'foosball', 'ball.urdf')
-        self.ball_id = p.loadURDF(ball_urdf_path, basePosition=[0, 0, table_height - 0.01])
+        self.ball_id = p.loadURDF(ball_urdf_path, basePosition=[0, 0, self.table_height + 0.1])
         
         # Add tiny randomized initial velocity
         random_vel = np.random.uniform(-0.05, 0.05, 3)
@@ -87,9 +87,9 @@ class FoosballEnv(gym.Env):
         obs = self._get_obs()
         self.prev_ball_dist_to_goal = np.linalg.norm(obs[0:2] - [self.opponent_goal_x, 0])
         
-        # Stuck ball detection
-        self.stuck_counter = 0
         self.last_ball_pos = obs[0:3]
+        
+        self.ball_in_play = False
         
         return obs, {}
 
@@ -104,11 +104,22 @@ class FoosballEnv(gym.Env):
         return np.concatenate([ball_pos, ball_vel, joint_positions, joint_velocities]).astype(np.float32)
 
     def step(self, action):
-        for i, joint_index in enumerate(self.revolute_joints):
-            p.setJointMotorControl2(self.table_id, joint_index, p.VELOCITY_CONTROL, targetVelocity=action[i] * 5, force=100)
+        ball_pos, _ = p.getBasePositionAndOrientation(self.ball_id)
         
+        if not self.ball_in_play:
+            if ball_pos[2] < self.table_height + 0.01:
+                self.ball_in_play = True
+        
+        # Set control for revolute joints (rotation)
+        for i, joint_index in enumerate(self.revolute_joints):
+            rotation_vel = action[i] * 5 if self.ball_in_play else 0
+            p.setJointMotorControl2(self.table_id, joint_index, p.VELOCITY_CONTROL, 
+                                    targetVelocity=rotation_vel, force=500)
+        
+        # Set control for prismatic joints (translation)
         for i, joint_index in enumerate(self.prismatic_joints):
-             p.setJointMotorControl2(self.table_id, joint_index, p.POSITION_CONTROL, targetPosition=action[i+8], force=100)
+             p.setJointMotorControl2(self.table_id, joint_index, p.VELOCITY_CONTROL, 
+                                     targetVelocity=action[i+8] * 2, force=500)
 
         p.stepSimulation()
         time.sleep(1./240.)
@@ -117,16 +128,36 @@ class FoosballEnv(gym.Env):
         ball_pos = observation[0:3]
         
         # Reward function
+        ball_vel = observation[3:6]
+        
+        # 1. Reward for moving the ball towards the opponent's goal
         dist_to_goal = np.linalg.norm(ball_pos[0:2] - [self.opponent_goal_x, 0])
-        reward = self.prev_ball_dist_to_goal - dist_to_goal
+        reward_dist = self.prev_ball_dist_to_goal - dist_to_goal
         self.prev_ball_dist_to_goal = dist_to_goal
+        
+        # 2. Penalty for ball being near own goal
+        dist_to_own_goal = np.linalg.norm(ball_pos[0:2] - [self.own_goal_x, 0])
+        reward_near_own_goal = -1.0 / (dist_to_own_goal + 1e-6)
+
+        # 3. Reward for ball speed
+        ball_speed_reward = np.linalg.norm(ball_vel)
+
+        # 4. Control penalty
+        reward_ctrl = -np.mean(np.square(action))
+
+        # Total reward
+        reward = (
+            reward_dist + 
+            0.1 * reward_near_own_goal + 
+            0.01 * ball_speed_reward + 
+            0.001 * reward_ctrl
+        )
 
         # Termination condition
         terminated = False
-        table_height = self.table_aabb[1][2]
-
-        if ball_pos[2] < 0.3: # Ball is below the table surface, threshold adjusted to 0.3
-            if ball_pos[0] > 0: # Opponent's side
+        
+        if ball_pos[2] < 0.3: # Ball is below the table surface
+            if ball_pos[0] > 0: # Opponent's side, simplified check
                 reward = 100
                 self.score[0] += 1
                 print(f"Goal! Score: {self.score[0]} - {self.score[1]}")
@@ -146,15 +177,9 @@ class FoosballEnv(gym.Env):
         self.last_ball_pos = ball_pos
         
         if dist_moved < 0.0001: # Check if ball moved less than 1mm
-            self.stuck_counter += 1
-        else:
-            self.stuck_counter = 0
-            
+            reward -= 0.01 # Small penalty for each step the ball is stuck
+        
         truncated = False
-        if self.stuck_counter > 2400: # If stuck for 240 steps (1 second)
-            reward -= 10 # Penalty for getting stuck
-            truncated = True
-            print("Ball is stuck, truncating episode.")
         
         info = {}
         
@@ -169,10 +194,10 @@ if __name__ == '__main__':
 
     for t in range(10000):
         # All rods rotate with the same angular velocity
-        # Oscillate translations between safe limits as they spin
-        rotation = np.ones(8) * 0.5
-        translation = np.ones(8) * (0.1 + 0.05 * np.sin(t * 0.01))  # Oscillates between 0.05 and 0.15
-        action = np.concatenate([rotation, translation])
+        # Oscillate translations with a sine wave
+        rotation_vel = np.ones(8) * 5  # constant high-speed rotation
+        translation_vel = np.ones(8) * (2 * np.sin(t * 0.01))  # Oscillating velocity
+        action = np.concatenate([rotation_vel, translation_vel])
         observation, reward, terminated, truncated, info = env.step(action)
         
         if terminated or truncated:
