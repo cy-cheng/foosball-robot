@@ -1,0 +1,329 @@
+╔════════════════════════════════════════════════════════════════════════════════╗
+║                     4-STAGE CURRICULUM TRAINING GUIDE                          ║
+╚════════════════════════════════════════════════════════════════════════════════╝
+
+📋 THE 4 CURRICULUM STAGES:
+
+Stage 1: DRIBBLE (Levels 1)
+  Description: Ball spawns stationary in front of agent
+  Goal: Learn basic ball control and hitting
+  Duration: ~250K steps (1 hour with 4 parallel envs)
+  Focus: Basic coordination, ball contact
+  
+Stage 2: PASS (Level 2)
+  Description: Ball rolls toward agent from midfield
+  Goal: Learn interception and positioning
+  Duration: ~250K steps
+  Focus: Timing, positioning near ball
+  Requires: Stage 1 checkpoint
+  
+Stage 3: DEFEND (Level 3)
+  Description: Ball shot fast at agent's goal
+  Goal: Learn defensive blocking
+  Duration: ~250K steps
+  Focus: Quick reaction, blocking, goal protection
+  Requires: Stage 2 checkpoint
+  
+Stage 4: FULL GAME (Level 4)
+  Description: Ball spawns randomly anywhere with random velocity
+  Goal: Learn complete game strategy
+  Duration: ~250K steps
+  Focus: Offense, defense, strategic play
+  Requires: Stage 3 checkpoint
+
+TOTAL TRAINING TIME: ~1 hour per stage × 4 stages = ~4 hours (with 4 parallel envs)
+
+════════════════════════════════════════════════════════════════════════════════
+
+🚀 HOW TO TRAIN STAGE BY STAGE:
+
+METHOD 1: Using train_stages.py (Recommended)
+
+Stage 1 - Fresh Start:
+  $ uv run train_stages.py --stage 1
+  ✓ Creates new model
+  ✓ Saves: saves/foosball_stage_1_completed.zip
+
+Stage 2 - Load Stage 1:
+  $ uv run train_stages.py --stage 2 --load saves/foosball_stage_1_completed.zip
+  ✓ Loads weights from Stage 1
+  ✓ Continues training on same network
+  ✓ Saves: saves/foosball_stage_2_completed.zip
+
+Stage 3 - Load Stage 2:
+  $ uv run train_stages.py --stage 3 --load saves/foosball_stage_2_completed.zip
+  ✓ Saves: saves/foosball_stage_3_completed.zip
+
+Stage 4 - Load Stage 3:
+  $ uv run train_stages.py --stage 4 --load saves/foosball_stage_3_completed.zip
+  ✓ Saves: saves/foosball_stage_4_completed.zip
+
+
+METHOD 2: Full Pipeline (One Command):
+
+All 4 stages in sequence:
+
+$ uv run train_stages.py --stage 1 && \
+  uv run train_stages.py --stage 2 --load saves/foosball_stage_1_completed.zip && \
+  uv run train_stages.py --stage 3 --load saves/foosball_stage_2_completed.zip && \
+  uv run train_stages.py --stage 4 --load saves/foosball_stage_3_completed.zip
+
+This will:
+  ✓ Train all 4 stages sequentially
+  ✓ Stop if any stage fails
+  ✓ Total time: ~4 hours with 4 parallel envs
+
+════════════════════════════════════════════════════════════════════════════════
+
+📂 CHECKPOINT FILE LOCATIONS:
+
+After each stage, a checkpoint is saved:
+
+saves/
+├── foosball_stage_1_completed.zip        ← End of Stage 1
+├── foosball_stage_2_completed.zip        ← End of Stage 2
+├── foosball_stage_3_completed.zip        ← End of Stage 3
+├── foosball_stage_4_completed.zip        ← End of Stage 4 (FINAL)
+│
+└── stage_1_ckpt_50000_steps.zip          ← Auto-save during Stage 1
+    stage_1_ckpt_100000_steps.zip
+    stage_1_ckpt_150000_steps.zip
+    stage_1_ckpt_200000_steps.zip
+    stage_1_ckpt_250000_steps.zip
+    
+    stage_2_ckpt_*.zip                    ← Auto-saves during Stage 2
+    stage_3_ckpt_*.zip                    ← Auto-saves during Stage 3
+    stage_4_ckpt_*.zip                    ← Auto-saves during Stage 4
+
+════════════════════════════════════════════════════════════════════════════════
+
+⚡ FAST TRAINING VARIANTS:
+
+Quick Test (5 minutes):
+  $ uv run train_stages.py --stage 1 --steps 10000 --num-envs 2
+
+Fast Full Training (2 hours instead of 4):
+  $ uv run train_stages.py --stage 1 --steps 250000 --num-envs 8 && \
+    ... (repeat for stages 2-4)
+
+Slow Training (for CPU, 16 hours):
+  $ uv run train_stages.py --stage 1 --steps 250000 --num-envs 1 && \
+    ... (repeat for stages 2-4)
+
+Custom Learning Rate:
+  $ uv run train_stages.py --stage 2 --load saves/foosball_stage_1_completed.zip --lr 5e-4
+
+════════════════════════════════════════════════════════════════════════════════
+
+🔄 RESUMING INTERRUPTED TRAINING:
+
+If training stops mid-stage:
+
+1. Check what checkpoint exists:
+   $ ls -lh saves/stage_*_ckpt_*.zip
+
+2. Resume from last checkpoint:
+   $ uv run train_stages.py --stage 2 --load saves/stage_2_ckpt_150000_steps.zip
+
+Note: The model will have already learned from previous stages
+      because it's loading from a stage-specific checkpoint.
+
+════════════════════════════════════════════════════════════════════════════════
+
+✓ AUTO-PROGRESSION EXPLANATION:
+
+Important: You DON'T manually set curriculum levels!
+
+How it works:
+  1. Environment always starts at Level 1
+  2. Levels auto-advance after 10 goals
+  3. Level sequence: L1 → L2 → L3 → L4
+  4. Happens automatically during training
+
+Example timeline:
+  t=0ms:     Level 1 (dribble), 0 goals
+  t=50ms:    Level 1 (dribble), 5 goals
+  t=100ms:   Level 1 (dribble), 10 goals → AUTO-ADVANCE
+  t=101ms:   Level 2 (pass), 0 goals (goal counter resets)
+  t=200ms:   Level 2 (pass), 8 goals
+  t=250ms:   Level 2 (pass), 10 goals → AUTO-ADVANCE
+  t=251ms:   Level 3 (defend), 0 goals
+  ... continues ...
+
+════════════════════════════════════════════════════════════════════════════════
+
+📊 EXPECTED PROGRESSION:
+
+Stage 1 (Dribble):
+  t=0:       Barely moves, random actions
+  t=50K:     Can hit ball sometimes
+  t=100K:    Consistent ball contact, weak aiming
+  t=150K:    Better coordination, some goal attempts
+  t=200K:    Decent hitting, starts passing
+  t=250K:    Reaches ~5-10 goals per match
+             → Moves to Stage 2
+
+Stage 2 (Pass):
+  t=0:       Struggles with moving ball
+  t=50K:     Can intercept occasionally
+  t=100K:    Better timing for interceptions
+  t=150K:    Consistent ball possession
+  t=200K:    Simple passing patterns emerge
+  t=250K:    Reaches ~10-20 goals per match
+             → Moves to Stage 3
+
+Stage 3 (Defend):
+  t=0:       Can't block fast shots
+  t=50K:     Learns basic defense positioning
+  t=100K:    Better anticipation
+  t=150K:    Solid defensive play
+  t=200K:    Advanced blocking strategies
+  t=250K:    Reaches ~20-35 goals per match
+             → Moves to Stage 4
+
+Stage 4 (Full Game):
+  t=0:       Mixed strategies from stages 1-3
+  t=50K:     Offensive/defensive balance improves
+  t=100K:    Complex strategies emerge
+  t=150K:    Strategic positioning
+  t=200K:    Near-optimal play
+  t=250K:    FINAL: 30-50+ goals per match
+             ✓ Training complete!
+
+════════════════════════════════════════════════════════════════════════════════
+
+🔧 COMMAND-LINE OPTIONS:
+
+uv run train_stages.py --stage 1 [OPTIONS]
+
+Options:
+  --stage {1,2,3,4}           Which stage to train [REQUIRED]
+  --load PATH                 Checkpoint to load (e.g., saves/foosball_stage_1_completed.zip)
+  --steps N                   Steps to train (default: 250K)
+  --num-envs N                Parallel environments (default: 4)
+  --lr RATE                   Learning rate (default: 3e-4)
+  --render                    Show GUI during training
+  -h, --help                  Show help
+
+Examples:
+  uv run train_stages.py --stage 1 --steps 500000
+  uv run train_stages.py --stage 2 --load saves/foosball_stage_1_completed.zip --num-envs 8
+  uv run train_stages.py --stage 4 --load saves/foosball_stage_3_completed.zip --render
+
+════════════════════════════════════════════════════════════════════════════════
+
+⚠️  IMPORTANT NOTES:
+
+1. Always load from PREVIOUS stage
+   ✓ Stage 2 → load Stage 1 checkpoint
+   ✗ Stage 2 → don't load Stage 3
+
+2. Curriculum auto-advances
+   ✓ Just train, levels progress automatically
+   ✗ Don't try to manually control levels
+
+3. Goal counter resets per level
+   Each level restarts goal counter at 0
+   First to reach 10 goals in new level
+
+4. Checkpoint naming matters
+   Easy to track: stage_X_completed for stage completion
+   Auto-saves: stage_X_ckpt_NSTEPS for during training
+
+5. Resuming mid-training
+   If interrupted, load the most recent checkpoint
+   Training will resume from that point
+
+════════════════════════════════════════════════════════════════════════════════
+
+🎯 COMMON TRAINING SCENARIOS:
+
+Scenario 1: Complete fresh training
+  uv run train_stages.py --stage 1
+  uv run train_stages.py --stage 2 --load saves/foosball_stage_1_completed.zip
+  uv run train_stages.py --stage 3 --load saves/foosball_stage_2_completed.zip
+  uv run train_stages.py --stage 4 --load saves/foosball_stage_3_completed.zip
+
+Scenario 2: Restart from middle (Stage 3 failed, try again)
+  uv run train_stages.py --stage 3 --load saves/foosball_stage_2_completed.zip
+
+Scenario 3: Fine-tune Stage 4 more
+  uv run train_stages.py --stage 4 --load saves/foosball_stage_4_completed.zip --steps 100000
+
+Scenario 4: Skip Stage 1-2, start from Stage 3 (if have Stage 2 checkpoint)
+  uv run train_stages.py --stage 3 --load saves/foosball_stage_2_completed.zip
+
+Scenario 5: Quick sanity check before committing to full training
+  uv run train_stages.py --stage 1 --steps 50000 --num-envs 2
+
+════════════════════════════════════════════════════════════════════════════════
+
+📈 MONITORING PROGRESS:
+
+TensorBoard (in separate terminal):
+  tensorboard --logdir logs/
+  
+View separate stage logs:
+  logs/stage_1_YYYYMMDD_HHMMSS/
+  logs/stage_2_YYYYMMDD_HHMMSS/
+  logs/stage_3_YYYYMMDD_HHMMSS/
+  logs/stage_4_YYYYMMDD_HHMMSS/
+
+Metrics to watch:
+  ✓ Episode reward (should increase)
+  ✓ Episode length (should increase)
+  ✓ Value loss (should decrease)
+  ✓ Policy loss (should be stable)
+
+════════════════════════════════════════════════════════════════════════════════
+
+✅ FINAL MODEL DEPLOYMENT:
+
+After all 4 stages:
+
+1. Final model checkpoint:
+   saves/foosball_stage_4_completed.zip
+
+2. Use for testing:
+   uv run test.py --model saves/foosball_stage_4_completed.zip --episodes 20
+
+3. Deploy to both teams:
+   The same model works for both Team 1 and Team 2
+   (with automatic X-coordinate mirroring for symmetry)
+
+════════════════════════════════════════════════════════════════════════════════
+
+🆘 TROUBLESHOOTING:
+
+Q: Where should I save checkpoints?
+A: All checkpoints go to saves/ directory automatically
+
+Q: Can I train Stage 2 without Stage 1?
+A: Technically yes, but Stage 2 is harder - Stage 1 prepares the network
+
+Q: My Stage 2 training isn't improving. What went wrong?
+A: Check if Stage 1 checkpoint is actually loaded: --load saves/foosball_stage_1_completed.zip
+
+Q: Can I use a different learning rate per stage?
+A: Yes! Use --lr flag: uv run train_stages.py --stage 2 --lr 5e-4
+
+Q: How do I know which checkpoint to load?
+A: For Stage N, load: saves/foosball_stage_(N-1)_completed.zip
+
+════════════════════════════════════════════════════════════════════════════════
+
+🚀 READY TO TRAIN!
+
+Start now with:
+
+  uv run train_stages.py --stage 1
+
+Then:
+
+  uv run train_stages.py --stage 2 --load saves/foosball_stage_1_completed.zip
+  uv run train_stages.py --stage 3 --load saves/foosball_stage_2_completed.zip
+  uv run train_stages.py --stage 4 --load saves/foosball_stage_3_completed.zip
+
+Total time: ~4 hours with 4 parallel environments
+
+Good luck! 🎮
