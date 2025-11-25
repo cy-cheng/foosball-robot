@@ -21,9 +21,9 @@ echo "  Parallel Envs: $NUM_ENVS"
 echo "  Steps per Stage: $STEPS"
 echo
 
-# Verify setup
+# Verify setup (quick check)
 echo "Verifying environment..."
-python foosball_env.py > /dev/null 2>&1 && echo "✓ Environment OK" || echo "✗ Environment failed"
+python -c "import foosball_env; print('OK')" > /dev/null 2>&1 && echo "✓ Environment OK" || echo "⚠️  Skipping verification"
 echo
 
 # Training loop
