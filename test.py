@@ -17,7 +17,7 @@ class SymmetricMatch:
         self.model = PPO.load(model_path)
         self.render = render
         self.env = FoosballEnv(
-            render_mode='human' if render else 'human',
+            render_mode='computer',
             curriculum_level=4,
             debug_mode=False,
             player_id=1
