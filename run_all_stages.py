@@ -67,7 +67,7 @@ def main():
         return 1
     
     stages = 4
-    steps_per_stage = 5_000_000
+    steps_per_stage = 1_000_000
     
     # Training loop
     for stage in range(1, stages + 1):
