@@ -96,7 +96,7 @@ class FoosballEnv(gym.Env):
         self.team2_joints = self.team2_slide_joints + self.team2_rev_joints
         self.all_joints = self.team1_joints + self.team2_joints
         
-        self.max_vel = 1.0
+        self.max_vel = 0.1  # Reduced from 1.0 to limit rotation speed
         self.max_force = 0.001
         
         # Goal line detection
@@ -139,14 +139,23 @@ class FoosballEnv(gym.Env):
             if rod_num is None:
                 continue
             
-            # Team 1: rods 1-4, Team 2: rods 5-8
-            team = 1 if rod_num <= 4 else 2
+            # Team 1 (Red): rods 1,2,4,6
+
+            if rod_num is None:
+                continue
+            
+            # Team 1 (Red): rods 1,2,4,6
+            # Team 2 (Blue): rods 3,5,7,8
+            if rod_num in [1, 2, 4, 6]:
+                team = 1
+            else:
+                team = 2
             
             # Color code by team
             if team == 1:
-                p.changeVisualShape(self.table_id, i, rgbaColor=[0, 0, 1, 1])
+                p.changeVisualShape(self.table_id, i, rgbaColor=[1, 0, 0, 1])  # Red
             else:
-                p.changeVisualShape(self.table_id, i, rgbaColor=[1, 0, 0, 1])
+                p.changeVisualShape(self.table_id, i, rgbaColor=[0, 0, 1, 1])  # Blue
             
             # Categorize by joint type
             if 'slide' in joint_name.lower():
@@ -159,7 +168,7 @@ class FoosballEnv(gym.Env):
                     self.team1_rev_joints.append(i)
                 else:
                     self.team2_rev_joints.append(i)
-
+    
     def _setup_camera(self):
         p.resetDebugVisualizerCamera(
             cameraDistance=1.5,
@@ -184,11 +193,17 @@ class FoosballEnv(gym.Env):
     def _curriculum_spawn_ball(self):
         """Spawn ball according to curriculum level"""
         if self.curriculum_level == 1:
-            # Dribble: stationary in front of own offensive rod
+            # Dribble: ball in random position reachable by all rods
+            # Place ball in front of team, covering all rod ranges
             if self.player_id == 1:
-                ball_pos = [-0.2, 0, 0.55]
+                # Team 1 rods cover x from -0.4 to 0.0, place ball between them
+                ball_x = np.random.uniform(-0.4, 0.0)
+                ball_y = np.random.uniform(-0.3, 0.3)
             else:
-                ball_pos = [0.2, 0, 0.55]
+                # Team 2 rods cover x from 0.0 to 0.4, place ball between them
+                ball_x = np.random.uniform(0.0, 0.4)
+                ball_y = np.random.uniform(-0.3, 0.3)
+            ball_pos = [ball_x, ball_y, 0.55]
             ball_vel = [0, 0, 0]
         elif self.curriculum_level == 2:
             # Pass: ball at midfield rolling toward own rods
@@ -371,6 +386,7 @@ class FoosballEnv(gym.Env):
         - Ball velocity towards opponent goal: +0.1
         - Distance to opponent goal: -0.01
         - Rod extension bonus: +0.1 per step if extended
+        - Redundant action penalty: -0.01 per extra rotating rod
         
         Sparse:
         - Goal: +100
@@ -398,6 +414,15 @@ class FoosballEnv(gym.Env):
         joint_states = p.getJointStates(self.table_id, team_slides)
         avg_extension = np.mean([abs(state[0]) for state in joint_states])
         reward += avg_extension * 0.1
+        
+        # Dense reward 4: penalty for redundant actions (too many rods rotating)
+        team_revs = self.team1_rev_joints if self.player_id == 1 else self.team2_rev_joints
+        joint_states_rev = p.getJointStates(self.table_id, team_revs)
+        # Count rods that are actively rotating (velocity > threshold)
+        active_rods = sum(1 for state in joint_states_rev if abs(state[1]) > 0.1)
+        # Penalty if more than 2 rods are rotating simultaneously
+        if active_rods > 2:
+            reward -= 0.002 * (active_rods - 2)
         
         # Sparse reward: goals
         # Goal for this player (ball crosses opponent goal line)

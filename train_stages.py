@@ -90,7 +90,7 @@ def train_stage(stage, load_checkpoint=None, steps=250_000, num_envs=4,
             
             return FoosballEnv(
                 render_mode=env_render_mode if (rank == 0 and render) else 'direct',
-                curriculum_level=1,  # Always start at 1, auto-advances
+                curriculum_level=stage,
                 debug_mode=False,
                 player_id=1
             )
