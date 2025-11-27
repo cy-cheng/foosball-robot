@@ -202,8 +202,11 @@ class FoosballEnv(gym.Env):
         return np.concatenate([mirrored_ball_pos, mirrored_ball_vel, joint_pos, joint_vel]).astype(np.float32)
 
     def _set_opponent_rods_to_90_degrees(self):
+        """Set opponent rods to 90 degrees."""
         revs = self.team2_rev_joints if self.player_id == 1 else self.team1_rev_joints
-        for joint_id in revs: p.setJointMotorControl2(self.table_id, joint_id, p.POSITION_CONTROL, targetPosition=np.pi/2, force=self.max_force)
+        for joint_id in revs:
+            p.resetJointState(self.table_id, joint_id, targetValue=np.pi/2)
+            p.setJointMotorControl2(self.table_id, joint_id, p.VELOCITY_CONTROL, force=0)
 
     def _simple_bot_logic(self):
         action = np.zeros(8)
@@ -254,6 +257,7 @@ class FoosballEnv(gym.Env):
         for i, joint_id in enumerate(slides):
             p.setJointMotorControl2(self.table_id, joint_id, p.POSITION_CONTROL, targetPosition=scaled_action[i], maxVelocity=self.max_vel, force=self.max_force)
         for i, joint_id in enumerate(revs):
+            #print(f"Applying velocity {scaled_action[i + 4]} to joint {joint_id}")
             p.setJointMotorControl2(self.table_id, joint_id, p.VELOCITY_CONTROL, targetVelocity=scaled_action[i + 4], force=self.max_force)
 
     def _debug_step(self, action):
@@ -326,12 +330,18 @@ def test_individual_rod_control():
         action[i+4] = 1.0
         for _ in range(50):
             env.step(action)
+            joint_states = p.getJointStates(env.table_id, env.team1_rev_joints)
+            joint_pos = [state[0] for state in joint_states]
+            print(f"Team 1 rod positions: {joint_pos}")
             time.sleep(0.01)
         print(f"Rod {i+1} (rotate index {i+4}): Spinning COUNTER-CLOCKWISE")
         action = np.zeros(8)
         action[i+4] = -1.0
         for _ in range(50):
             env.step(action)
+            joint_states = p.getJointStates(env.table_id, env.team1_rev_joints)
+            joint_pos = [state[0] for state in joint_states]
+            print(f"Team 1 rod positions: {joint_pos}")
             time.sleep(0.01)
         action = np.zeros(8)
         env.step(action)
@@ -367,12 +377,18 @@ def test_blue_team_rod_control():
         action[i+4] = 1.0
         for _ in range(50):
             env.step(action)
+            joint_states = p.getJointStates(env.table_id, env.team2_rev_joints)
+            joint_pos = [state[0] for state in joint_states]
+            print(f"Team 2 rod positions: {joint_pos}")
             time.sleep(0.01)
         print(f"Rod {i+1} (rotate index {i+4}): Spinning COUNTER-CLOCKWISE")
         action = np.zeros(8)
         action[i+4] = -1.0
         for _ in range(50):
             env.step(action)
+            joint_states = p.getJointStates(env.table_id, env.team2_rev_joints)
+            joint_pos = [state[0] for state in joint_states]
+            print(f"Team 2 rod positions: {joint_pos}")
             time.sleep(0.01)
         action = np.zeros(8)
         env.step(action)
