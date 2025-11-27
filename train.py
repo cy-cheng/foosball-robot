@@ -62,7 +62,7 @@ def make_env(rank, curriculum_level=1, player_id=1, seed=None):
     """Create a single environment"""
     def _init():
         env = FoosballEnv(
-            render_mode='human' if rank == 0 else 'human',
+            render_mode='human' if rank == 0 else 'computer',
             curriculum_level=curriculum_level,
             debug_mode=False,
             player_id=player_id
@@ -188,7 +188,7 @@ def evaluate(model_path, num_episodes=10, curriculum_level=4, render=True):
     
     # Create environment (player_id doesn't matter for eval, just use 1)
     env = FoosballEnv(
-        render_mode='human' if render else 'human',
+        render_mode='human' if render else 'computer',
         curriculum_level=curriculum_level,
         debug_mode=False,
         player_id=1
