@@ -138,18 +138,20 @@ class FoosballEnv(gym.Env):
         if self.curriculum_level == 1:
             if self.player_id == 1:
                 ball_x, ball_y = np.random.uniform(-0.4, 0.0), np.random.uniform(-0.3, 0.3)
+                ball_vel = [np.random.uniform(-0.2, -0.1), np.random.uniform(-0.1, 0.1), 0]
             else:
                 ball_x, ball_y = np.random.uniform(0.0, 0.4), np.random.uniform(-0.3, 0.3)
-            ball_pos, ball_vel = [ball_x, ball_y, 0.55], [0, 0, 0]
+                ball_vel = [np.random.uniform(0.1, 0.2), np.random.uniform(-0.1, 0.1), 0]
+            ball_pos = [ball_x, ball_y, 0.55]
         elif self.curriculum_level == 2:
             ball_pos = [0, 0, 0.55]
             if self.player_id == 1: ball_vel = [-1, np.random.uniform(-0.5, 0.5), 0]
             else: ball_vel = [1, np.random.uniform(-0.5, 0.5), 0]
         elif self.curriculum_level == 3:
             if self.player_id == 1:
-                ball_pos, ball_vel = [0.4, np.random.uniform(-0.2, 0.2), 0.55], [-5, np.random.uniform(-1, 1), 0]
+                ball_pos, ball_vel = [-0.4, np.random.uniform(-0.2, 0.2), 0.55], [-5, np.random.uniform(-1, 1), 0]
             else:
-                ball_pos, ball_vel = [-0.4, np.random.uniform(-0.2, 0.2), 0.55], [5, np.random.uniform(-1, 1), 0]
+                ball_pos, ball_vel = [0.4, np.random.uniform(-0.2, 0.2), 0.55], [5, np.random.uniform(-1, 1), 0]
         else:
             ball_pos, ball_vel = [np.random.uniform(-0.6, 0.6), np.random.uniform(-0.3, 0.3), 0.55], [np.random.uniform(-2, 2), np.random.uniform(-2, 2), 0]
         p.resetBasePositionAndOrientation(self.ball_id, ball_pos, [0, 0, 0, 1])
