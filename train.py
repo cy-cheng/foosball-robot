@@ -22,7 +22,7 @@ import sys
 from datetime import datetime
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
-from stable_baselines3.common.vec_env import DummyVecEnv
+from stable_baselines3.common.vec_env import SubprocVecEnv
 from foosball_env import FoosballEnv
 
 
@@ -117,7 +117,7 @@ def train_stage(stage, load_checkpoint=None, steps=250_000, num_envs=4,
                 )
             return _init
             
-        env = DummyVecEnv([make_env(i) for i in range(num_envs)])
+        env = SubprocVecEnv([make_env(i) for i in range(num_envs)])
         model.set_env(env)
         
         # Callback for self-play
@@ -145,7 +145,7 @@ def train_stage(stage, load_checkpoint=None, steps=250_000, num_envs=4,
             return _init
         
         print("Creating environments...")
-        env = DummyVecEnv([make_env(i) for i in range(num_envs)])
+        env = SubprocVecEnv([make_env(i) for i in range(num_envs)])
         
         # Load or create model
         if load_checkpoint and os.path.exists(load_checkpoint):
