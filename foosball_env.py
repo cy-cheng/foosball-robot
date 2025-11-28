@@ -162,7 +162,7 @@ class FoosballEnv(gym.Env):
             else:
                 ball_pos, ball_vel = [0.4, np.random.uniform(-0.2, 0.2), 0.55], [5, np.random.uniform(-1, 1), 0]
         else:
-            ball_pos, ball_vel = [np.random.uniform(-0.6, 0.6), np.random.uniform(-0.3, 0.3), 0.55], [np.random.uniform(-2, 2), np.random.uniform(-2, 2), 0]
+            ball_pos, ball_vel = [np.random.uniform(-0.6, 0.6), np.random.uniform(-0.3, 0.3), 0.55], [np.random.uniform(-1, 1), np.random.uniform(-1, 1), 0]
         p.resetBasePositionAndOrientation(self.ball_id, ball_pos, [0, 0, 0, 1])
         p.resetBaseVelocity(self.ball_id, linearVelocity=ball_vel)
 
@@ -197,6 +197,24 @@ class FoosballEnv(gym.Env):
             self._apply_action(scaled_opponent_action, 3 - self.player_id)
             
         p.stepSimulation()
+
+        # Nudge the ball if it's stuck at the edges
+        ball_pos, _ = p.getBasePositionAndOrientation(self.ball_id)
+        ball_vel, _ = p.getBaseVelocity(self.ball_id)
+        
+        # Only apply nudge if the ball is almost stationary
+        if np.linalg.norm(ball_vel) < 0.05:
+            nudge_force = [0, 0, 0]
+            # Nudge from side walls
+            if abs(ball_pos[1]) > 0.290:
+                nudge_force[1] = -np.sign(ball_pos[1]) * 0.05
+            # Nudge from end walls (corners)
+            if abs(ball_pos[0]) > 0.680 and abs(ball_pos[1]) > 0.125:
+                nudge_force[0] = -np.sign(ball_pos[0]) * 0.20
+            
+            if np.any(nudge_force):
+                p.applyExternalForce(self.ball_id, -1, nudge_force, ball_pos, p.WORLD_FRAME)
+
         obs = self._get_obs()
         reward = self._compute_reward()
         terminated, truncated = self._check_termination(obs)
@@ -304,7 +322,7 @@ class FoosballEnv(gym.Env):
             active_rods = sum(1 for state in joint_states_rev if abs(state[1]) > 0.1)
             if active_rods > 2: reward -= 0.002 * (active_rods - 2)
         if (self.player_id == 1 and ball_pos[0] > self.goal_line_x_2) or (self.player_id == 2 and ball_pos[0] < self.goal_line_x_1):
-            reward += 100
+            reward += 125
             self.goals_this_level += 1
         if (self.player_id == 1 and ball_pos[0] < self.goal_line_x_1) or (self.player_id == 2 and ball_pos[0] > self.goal_line_x_2):
             reward -= 50
