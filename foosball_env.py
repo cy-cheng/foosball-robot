@@ -12,10 +12,14 @@ class FoosballEnv(gym.Env):
     """
     metadata = {'render.modes': ['human']}
 
-    def __init__(self, render_mode='human', curriculum_level=1, debug_mode=False, player_id=1, opponent_model=None):
+    def __init__(self, render_mode='human', curriculum_level=1, debug_mode=False, player_id=1, opponent_model=None, goal_debug_mode=False):
         super(FoosballEnv, self).__init__()
 
         self.render_mode = render_mode
+        self.goal_debug_mode = goal_debug_mode
+        if self.goal_debug_mode:
+            self.render_mode = 'human'
+
         self.curriculum_level = curriculum_level
         self.debug_mode = debug_mode
         self.player_id = player_id
@@ -78,15 +82,20 @@ class FoosballEnv(gym.Env):
         self.max_vel = 1.5
         self.max_force = 1.0
         
-        self.goal_line_x_1 = -0.59
-        self.goal_line_x_2 = 0.59
+        self.goal_line_x_1 = -0.75
+        self.goal_line_x_2 = 0.75
+        self.stuck_ball_penalty = -0.01
         
+        if self.goal_debug_mode:
+            self.goal_line_slider_1 = p.addUserDebugParameter("Goal Line 1", -1.0, 1.0, self.goal_line_x_1)
+            self.goal_line_slider_2 = p.addUserDebugParameter("Goal Line 2", -1.0, 1.0, self.goal_line_x_2)
+
         if self.debug_mode and self.render_mode == 'human':
             self._add_debug_sliders()
 
-    def update_opponent_model(self, model):
+    def update_opponent_model(self, state_dict):
         if self.opponent_model:
-            self.opponent_model.policy.load_state_dict(model.policy.state_dict())
+            self.opponent_model.policy.load_state_dict(state_dict)
 
     def _parse_joints(self):
         num_joints = p.getNumJoints(self.table_id)
@@ -300,6 +309,10 @@ class FoosballEnv(gym.Env):
             self.goals_this_level += 1
         if (self.player_id == 1 and ball_pos[0] < self.goal_line_x_1) or (self.player_id == 2 and ball_pos[0] > self.goal_line_x_2):
             reward -= 50
+        
+        if np.linalg.norm(ball_vel) < 0.001:
+            reward += self.stuck_ball_penalty
+        
         return reward
 
     def _check_termination(self, obs):
@@ -319,6 +332,82 @@ class FoosballEnv(gym.Env):
 
     def close(self):
         p.disconnect(self.client)
+
+    def run_goal_debug_loop(self):
+        """
+        A debug loop for visualizing goal lines and manually controlling the ball.
+        """
+        if not self.goal_debug_mode:
+            print("Goal debug mode is not enabled. Please instantiate Env with goal_debug_mode=True.")
+            return
+
+        print("\n" + "="*80 + "\nGOAL LINE DEBUG MODE\n" + "="*80)
+        print(" - Use ARROW KEYS to move the ball.")
+        print(" - Use the sliders to adjust the goal lines.")
+        print(" - Ball coordinates are printed in the console.")
+        print(" - Press ESC or close the window to exit.")
+        
+        table_aabb = p.getAABB(self.table_id)
+        y_min, y_max = table_aabb[0][1], table_aabb[1][1]
+        z_pos = 0.55  # Approximate height of the playing surface
+
+        line1_id = None
+        line2_id = None
+        
+        move_speed = 0.01
+
+        try:
+            while True:
+                # Keyboard events for ball control
+                keys = p.getKeyboardEvents()
+                
+                ball_pos, ball_orn = p.getBasePositionAndOrientation(self.ball_id)
+                new_pos = list(ball_pos)
+
+                if p.B3G_LEFT_ARROW in keys and keys[p.B3G_LEFT_ARROW] & p.KEY_IS_DOWN:
+                    new_pos[0] -= move_speed
+                if p.B3G_RIGHT_ARROW in keys and keys[p.B3G_RIGHT_ARROW] & p.KEY_IS_DOWN:
+                    new_pos[0] += move_speed
+                if p.B3G_UP_ARROW in keys and keys[p.B3G_UP_ARROW] & p.KEY_IS_DOWN:
+                    new_pos[1] += move_speed
+                if p.B3G_DOWN_ARROW in keys and keys[p.B3G_DOWN_ARROW] & p.KEY_IS_DOWN:
+                    new_pos[1] -= move_speed
+                
+                p.resetBasePositionAndOrientation(self.ball_id, new_pos, ball_orn)
+
+                # Read sliders and update goal lines
+                self.goal_line_x_1 = p.readUserDebugParameter(self.goal_line_slider_1)
+                self.goal_line_x_2 = p.readUserDebugParameter(self.goal_line_slider_2)
+                
+                # Draw new debug lines
+                if line1_id is not None:
+                    p.removeUserDebugItem(line1_id)
+                if line2_id is not None:
+                    p.removeUserDebugItem(line2_id)
+                
+                line1_id = p.addUserDebugLine([self.goal_line_x_1, y_min, z_pos], [self.goal_line_x_1, y_max, z_pos], [1, 0, 0], 2)
+                line2_id = p.addUserDebugLine([self.goal_line_x_2, y_min, z_pos], [self.goal_line_x_2, y_max, z_pos], [0, 0, 1], 2)
+
+                # Print ball coordinates
+                current_ball_pos, _ = p.getBasePositionAndOrientation(self.ball_id)
+                goal_status = ""
+                # Assuming player 1's perspective for debug
+                if current_ball_pos[0] > self.goal_line_x_2:
+                    goal_status = "GOAL for Player 1!"
+                elif current_ball_pos[0] < self.goal_line_x_1:
+                    goal_status = "OWN GOAL (Player 2 scores)"
+
+                print(f"\rBall Position: x={current_ball_pos[0]:.3f}, y={current_ball_pos[1]:.3f}, z={current_ball_pos[2]:.3f} | {goal_status}                ", end="")
+
+                p.stepSimulation()
+                time.sleep(1./240.)
+
+        except p.error as e:
+            # This can happen if the user closes the window
+            pass
+        finally:
+            print("\nExiting goal debug mode.")
+            self.close()
 
 
 def test_individual_rod_control():
@@ -415,5 +504,14 @@ def test_blue_team_rod_control():
     env.close()
 
 if __name__ == '__main__':
-    test_individual_rod_control()
-    test_blue_team_rod_control()
+    import argparse
+    parser = argparse.ArgumentParser(description="Test or debug the FoosballEnv.")
+    parser.add_argument("--debug-goal", action="store_true", help="Run the goal line debug mode.")
+    args = parser.parse_args()
+
+    if args.debug_goal:
+        env = FoosballEnv(goal_debug_mode=True)
+        env.run_goal_debug_loop()
+    else:
+        test_individual_rod_control()
+        test_blue_team_rod_control()

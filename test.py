@@ -110,7 +110,7 @@ class SymmetricMatch:
                 action1, _ = self.model.predict(obs, deterministic=True)
                 
                 # Mirror observation for Team 2
-                mirrored_obs = self.env.get_mirrored_obs()
+                mirrored_obs = self.env._get_mirrored_obs()
                 
                 # Team 2 action (mirror of team 1)
                 action2, _ = self.model.predict(mirrored_obs, deterministic=True)
