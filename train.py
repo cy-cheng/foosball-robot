@@ -33,7 +33,7 @@ class SelfPlayCallback(BaseCallback):
 
     def _on_step(self) -> bool:
         if self.n_calls % self.update_freq == 0:
-            self.training_env.env_method("update_opponent_model", self.model.policy.state_dict())
+            self.training_env.env_method("update_opponent_model", self.model.policy.to("cpu").state_dict())
         return True
 
 

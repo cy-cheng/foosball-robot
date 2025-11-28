@@ -171,7 +171,7 @@ class FoosballEnv(gym.Env):
         for joint_id in self.all_joints: p.resetJointState(self.table_id, joint_id, targetValue=0, targetVelocity=0)
         self._curriculum_spawn_ball()
         if self.curriculum_level == 1:
-            for _ in range(20):
+            for _ in range(100): # More steps to ensure rods are settled
                 self._set_opponent_rods_to_90_degrees()
                 p.stepSimulation()
         self.ball_stuck_counter, self.episode_step_count, self.goals_this_level = 0, 0, 0
@@ -216,8 +216,7 @@ class FoosballEnv(gym.Env):
         """Set opponent rods to 90 degrees."""
         revs = self.team2_rev_joints if self.player_id == 1 else self.team1_rev_joints
         for joint_id in revs:
-            p.resetJointState(self.table_id, joint_id, targetValue=np.pi/2)
-            p.setJointMotorControl2(self.table_id, joint_id, p.VELOCITY_CONTROL, force=0)
+            p.setJointMotorControl2(self.table_id, joint_id, p.POSITION_CONTROL, targetPosition=np.pi/2, force=self.max_force)
 
     def _simple_bot_logic(self):
         action = np.zeros(8)
@@ -231,7 +230,7 @@ class FoosballEnv(gym.Env):
                 action[i+4] = np.random.uniform(-np.pi, np.pi)
         elif self.curriculum_level >= 3:
             for i in range(4):
-                action[i] = np.clip(mirrored_ball_pos[1] / 0.3, -1, 1)
+                action[i] = np.clip(-mirrored_ball_pos[1] / 0.3, -1, 1)
                 action[i+4] = np.pi/2 # Keep rods vertical
         return action
 
