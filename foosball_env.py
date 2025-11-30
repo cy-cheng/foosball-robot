@@ -39,7 +39,7 @@ class FoosballEnv(gym.Env):
         self.ball_stuck_counter = 0
         self.max_stuck_steps = 1500
         self.episode_step_count = 0
-        self.max_episode_steps = 10000
+        self.max_episode_steps = 50000
         
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
         p.setGravity(0, 0, -9.81)
@@ -84,7 +84,7 @@ class FoosballEnv(gym.Env):
         
         self.goal_line_x_1 = -0.75
         self.goal_line_x_2 = 0.75
-        self.stuck_ball_penalty = -0.01
+        self.stuck_ball_penalty = -10
         
         if self.goal_debug_mode:
             self.goal_line_slider_1 = p.addUserDebugParameter("Goal Line 1", -1.0, 1.0, self.goal_line_x_1)
@@ -157,10 +157,23 @@ class FoosballEnv(gym.Env):
             if self.player_id == 1: ball_vel = [-1, np.random.uniform(-0.5, 0.5), 0]
             else: ball_vel = [1, np.random.uniform(-0.5, 0.5), 0]
         elif self.curriculum_level == 3:
+            speed = 4.5
             if self.player_id == 1:
-                ball_pos, ball_vel = [-0.4, np.random.uniform(-0.2, 0.2), 0.55], [-5, np.random.uniform(-1, 1), 0]
-            else:
-                ball_pos, ball_vel = [0.4, np.random.uniform(-0.2, 0.2), 0.55], [5, np.random.uniform(-1, 1), 0]
+                spawn_pos = np.array([np.random.uniform(-0.5, -0.4), np.random.uniform(-0.25, 0.25), 0.55])
+                target_pos = np.array([self.goal_line_x_1, np.random.uniform(-0.05, 0.05), 0.55])
+                direction = target_pos - spawn_pos
+                direction_norm = np.linalg.norm(direction)
+                if direction_norm == 0: direction_norm = 1
+                ball_vel = (direction / direction_norm) * speed
+                ball_pos = spawn_pos.tolist()
+            else: # player_id == 2
+                spawn_pos = np.array([0.5, np.random.uniform(-0.25, 0.25), 0.55])
+                target_pos = np.array([self.goal_line_x_2, 0, 0.55])
+                direction = target_pos - spawn_pos
+                direction_norm = np.linalg.norm(direction)
+                if direction_norm == 0: direction_norm = 1
+                ball_vel = (direction / direction_norm) * speed
+                ball_pos = spawn_pos.tolist()
         else:
             ball_pos, ball_vel = [np.random.uniform(-0.6, 0.6), np.random.uniform(-0.3, 0.3), 0.55], [np.random.uniform(-1, 1), np.random.uniform(-1, 1), 0]
         p.resetBasePositionAndOrientation(self.ball_id, ball_pos, [0, 0, 0, 1])
@@ -198,22 +211,15 @@ class FoosballEnv(gym.Env):
             
         p.stepSimulation()
 
-        # Nudge the ball if it's stuck at the edges
+        # If the ball is stuck, apply a gentle nudge towards the center
         ball_pos, _ = p.getBasePositionAndOrientation(self.ball_id)
         ball_vel, _ = p.getBaseVelocity(self.ball_id)
         
-        # Only apply nudge if the ball is almost stationary
-        if np.linalg.norm(ball_vel) < 0.05:
-            nudge_force = [0, 0, 0]
-            # Nudge from side walls
-            if abs(ball_pos[1]) > 0.290:
-                nudge_force[1] = -np.sign(ball_pos[1]) * 0.05
-            # Nudge from end walls (corners)
-            if abs(ball_pos[0]) > 0.680 and abs(ball_pos[1]) > 0.125:
-                nudge_force[0] = -np.sign(ball_pos[0]) * 0.20
-            
-            if np.any(nudge_force):
-                p.applyExternalForce(self.ball_id, -1, nudge_force, ball_pos, p.WORLD_FRAME)
+        if np.linalg.norm(ball_vel) < 0.01 and self.ball_stuck_counter > 100:
+            # Apply a force towards the center of the table, proportional to the distance from the center
+            force_magnitude = 0.05
+            nudge_force = [-ball_pos[0] * force_magnitude, -ball_pos[1] * force_magnitude, 0]
+            p.applyExternalForce(self.ball_id, -1, nudge_force, ball_pos, p.WORLD_FRAME)
 
         obs = self._get_obs()
         reward = self._compute_reward()
@@ -235,6 +241,17 @@ class FoosballEnv(gym.Env):
         revs = self.team2_rev_joints if self.player_id == 1 else self.team1_rev_joints
         for joint_id in revs:
             p.setJointMotorControl2(self.table_id, joint_id, p.POSITION_CONTROL, targetPosition=np.pi/2, force=self.max_force)
+
+    def _set_all_rods_to_90_degrees(self):
+        """Set all rods to 90 degrees for a clear view."""
+        all_rev_joints = self.team1_rev_joints + self.team2_rev_joints
+        for joint_id in all_rev_joints:
+            p.setJointMotorControl2(self.table_id, joint_id, p.POSITION_CONTROL, targetPosition=np.pi/2, force=self.max_force)
+        # Step simulation a few times to let rods settle
+        for _ in range(50):
+            p.stepSimulation()
+            if self.render_mode == 'human':
+                time.sleep(1./240.)
 
     def _simple_bot_logic(self):
         action = np.zeros(8)
@@ -322,10 +339,10 @@ class FoosballEnv(gym.Env):
             active_rods = sum(1 for state in joint_states_rev if abs(state[1]) > 0.1)
             if active_rods > 2: reward -= 0.002 * (active_rods - 2)
         if (self.player_id == 1 and ball_pos[0] > self.goal_line_x_2) or (self.player_id == 2 and ball_pos[0] < self.goal_line_x_1):
-            reward += 125
+            reward += 250
             self.goals_this_level += 1
         if (self.player_id == 1 and ball_pos[0] < self.goal_line_x_1) or (self.player_id == 2 and ball_pos[0] > self.goal_line_x_2):
-            reward -= 50
+            reward -= 100
         
         if np.linalg.norm(ball_vel) < 0.001:
             reward += self.stuck_ball_penalty
@@ -520,15 +537,64 @@ def test_blue_team_rod_control():
     print("\n✅ Individual rod control test complete for Blue Team")
     env.close()
 
+def test_stage_3_spawning():
+    """Test the ball spawning for Stage 3 to ensure it travels towards the goal."""
+    print("\n" + "="*80 + "\nTEST: STAGE 3 BALL SPAWNING (Team 1 - RED)\n" + "="*80)
+    env = FoosballEnv(render_mode='human', curriculum_level=3, player_id=1)
+    
+    for i in range(5):
+        print(f"\n--- Test run {i+1}/5 ---")
+        obs, _ = env.reset()
+        
+        print("  Setting all rods to 90 degrees for a clear view...")
+        env._set_all_rods_to_90_degrees()
+        
+        # Reset the ball again to the curriculum position after moving the rods
+        env._curriculum_spawn_ball()
+        
+        obs = env._get_obs()
+        ball_pos = obs[:3]
+        ball_vel = obs[3:6]
+        print(f"  Initial Ball Position: {ball_pos}")
+        print(f"  Initial Ball Velocity: {ball_vel}")
+        
+        # Let the simulation run to observe the ball's trajectory
+        for _ in range(150):
+            # Only step the physics, don't apply any agent actions
+            p.stepSimulation()
+            if env.render_mode == 'human':
+                time.sleep(1./240.)
+            
+        final_ball_pos, _ = p.getBasePositionAndOrientation(env.ball_id)
+        print(f"  Final Ball Position:   {final_ball_pos}")
+        
+        # Check if the ball crossed the goal line
+        if final_ball_pos[0] < env.goal_line_x_1:
+            print("  ✅ GOAL SCORED!")
+        else:
+            print("  ❌ NO GOAL. Ball did not reach the goal line.")
+            
+        time.sleep(1)
+
+    env.close()
+    print("\n✅ Stage 3 spawning test complete.")
+
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description="Test or debug the FoosballEnv.")
-    parser.add_argument("--debug-goal", action="store_true", help="Run the goal line debug mode.")
+    parser.add_argument("--test", type=str, default="all", choices=["all", "rods_red", "rods_blue", "spawn3", "debug_goal"], help="Specify which test to run.")
     args = parser.parse_args()
 
-    if args.debug_goal:
+    if args.test == "debug_goal":
         env = FoosballEnv(goal_debug_mode=True)
         env.run_goal_debug_loop()
-    else:
+    elif args.test == "rods_red":
+        test_individual_rod_control()
+    elif args.test == "rods_blue":
+        test_blue_team_rod_control()
+    elif args.test == "spawn3":
+        test_stage_3_spawning()
+    elif args.test == "all":
         test_individual_rod_control()
         test_blue_team_rod_control()
+        print("\nSkipping spawn3 test in 'all' mode. Run with --test spawn3 to see it.")

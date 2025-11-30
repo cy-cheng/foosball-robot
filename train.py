@@ -41,25 +41,25 @@ STAGE_INFO = {
     1: {
         "name": "Dribble",
         "description": "Ball stationary - learn basic hitting",
-        "steps": 250_000,
+        "steps": 1_000_000,
         "focus": "Basic control, ball contact"
     },
     2: {
         "name": "Pass",
         "description": "Ball rolling toward you - learn interception",
-        "steps": 250_000,
+        "steps": 1_000_000,
         "focus": "Interception, positioning"
     },
     3: {
         "name": "Defend",
         "description": "Ball shot fast at goal - learn defense",
-        "steps": 250_000,
+        "steps": 1_000_000,
         "focus": "Blocking, defensive positioning"
     },
     4: {
         "name": "Full Game",
         "description": "Random play - learn complete strategy",
-        "steps": 250_000,
+        "steps": 10_000_000,
         "focus": "Offense, defense, strategy"
     }
 }
