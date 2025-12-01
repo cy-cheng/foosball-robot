@@ -40,6 +40,8 @@ class FoosballEnv(gym.Env):
         self.max_stuck_steps = 1500
         self.episode_step_count = 0
         self.max_episode_steps = steps_per_episode
+        self.previous_action = np.zeros(self.action_space.shape)
+        self.previous_ball_dist = 0
         
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
         p.setGravity(0, 0, -9.81)
@@ -60,6 +62,8 @@ class FoosballEnv(gym.Env):
         self.team2_rev_joints = []
         self.team1_player_links = []
         self.team2_player_links = []
+        self.team1_players_by_rod = {}
+        self.team2_players_by_rod = {}
         self.joint_name_to_id = {}
         self.joint_limits = {}
         self.goal_link_a = None
@@ -115,8 +119,14 @@ class FoosballEnv(gym.Env):
                     team = 1 if rod_num in [1, 2, 4, 6] else 2
                     if team == 1:
                         self.team1_player_links.append(link_index)
+                        if rod_num not in self.team1_players_by_rod:
+                            self.team1_players_by_rod[rod_num] = []
+                        self.team1_players_by_rod[rod_num].append(link_index)
                     else:
                         self.team2_player_links.append(link_index)
+                        if rod_num not in self.team2_players_by_rod:
+                            self.team2_players_by_rod[rod_num] = []
+                        self.team2_players_by_rod[rod_num].append(link_index)
                 except (ValueError, IndexError):
                     continue # Not a player link
 
@@ -234,15 +244,16 @@ class FoosballEnv(gym.Env):
         ball_pos, _ = p.getBasePositionAndOrientation(self.ball_id)
         ball_vel, _ = p.getBaseVelocity(self.ball_id)
         
-        if np.linalg.norm(ball_vel) < 0.01 and self.ball_stuck_counter > 100:
+        if np.linalg.norm(ball_vel) < 0.01 and self.ball_stuck_counter > 2000:
             # Apply a force towards the center of the table, proportional to the distance from the center
-            force_magnitude = 0.1
+            force_magnitude = 2.0
             nudge_force = [-ball_pos[0] * force_magnitude, -ball_pos[1] * force_magnitude, 0]
             p.applyExternalForce(self.ball_id, -1, nudge_force, ball_pos, p.WORLD_FRAME)
 
         obs = self._get_obs()
-        reward = self._compute_reward()
+        reward = self._compute_reward(action)
         terminated, truncated = self._check_termination(obs)
+        self.previous_action = action
         return obs, reward, terminated, truncated, {}
 
     def _get_mirrored_obs(self):
@@ -356,7 +367,7 @@ class FoosballEnv(gym.Env):
             ball_vel = (-ball_vel[0], ball_vel[1], ball_vel[2])
         return np.concatenate([ball_pos, ball_vel, joint_pos, joint_vel]).astype(np.float32)
 
-    def _compute_reward(self):
+    def _compute_reward(self, action):
         ball_pos, _ = p.getBasePositionAndOrientation(self.ball_id)
         ball_vel, _ = p.getBaseVelocity(self.ball_id)
         reward = 0
@@ -368,6 +379,50 @@ class FoosballEnv(gym.Env):
         # Penalty for distance from opponent's goal
         reward -= 0.001 * abs(ball_pos[0] - goal_x)
 
+        # Closest Player-Ball Distance Reward
+        agent_players_by_rod = self.team1_players_by_rod if self.player_id == 1 else self.team2_players_by_rod
+        total_dist_reward = 0
+        
+        for rod_num, player_links in agent_players_by_rod.items():
+            min_dist_for_rod = float('inf')
+            closest_player_y = 0
+            for link_idx in player_links:
+                link_state = p.getLinkState(self.table_id, link_idx)
+                player_y = link_state[0][1]
+                dist = abs(player_y - ball_pos[1])
+                if dist < min_dist_for_rod:
+                    min_dist_for_rod = dist
+                    closest_player_y = player_y
+            
+            total_dist_reward -= min_dist_for_rod
+
+        reward += total_dist_reward * 0.1
+
+        # Potential-based reward for moving closer to the ball
+        # This uses the average of the closest players on each rod
+        avg_closest_player_y = 0
+        if agent_players_by_rod:
+            for rod_num, player_links in agent_players_by_rod.items():
+                min_dist_for_rod = float('inf')
+                closest_player_y = 0
+                for link_idx in player_links:
+                    link_state = p.getLinkState(self.table_id, link_idx)
+                    player_y = link_state[0][1]
+                    dist = abs(player_y - ball_pos[1])
+                    if dist < min_dist_for_rod:
+                        min_dist_for_rod = dist
+                        closest_player_y = player_y
+                avg_closest_player_y += closest_player_y
+            avg_closest_player_y /= len(agent_players_by_rod)
+
+        current_ball_dist = np.linalg.norm(np.array(ball_pos[:2]) - np.array([0, avg_closest_player_y]))
+        reward += (self.previous_ball_dist - current_ball_dist) * 0.1
+        self.previous_ball_dist = current_ball_dist
+
+        # Action rate penalty
+        action_rate_penalty = np.mean(np.square(self.previous_action - action))
+        reward -= action_rate_penalty * 0.01
+
         # Reward for making contact with the ball
         contact_with_agent = False
         agent_player_links = self.team1_player_links if self.player_id == 1 else self.team2_player_links
@@ -378,7 +433,7 @@ class FoosballEnv(gym.Env):
                 break
         
         if contact_with_agent:
-            reward += 100 # Reward for contact with the agent's rods
+            reward += 100
 
         # Sparse rewards for goals
         if (self.player_id == 1 and ball_pos[0] > self.goal_line_x_2) or \
@@ -697,7 +752,7 @@ def test_mirrored_obs_and_contact_reward():
         time.sleep(0.01)
 
     contact_points = p.getContactPoints(bodyA=env.table_id, bodyB=env.ball_id, linkIndexA=agent_rod_link_index)
-    reward = env._compute_reward()
+    reward = env._compute_reward(np.zeros(8))
     
     print(f"  Detected {len(contact_points)} contact points with the target link.")
     print(f"  Calculated reward: {reward}")
