@@ -12,7 +12,7 @@ class FoosballEnv(gym.Env):
     """
     metadata = {'render.modes': ['human']}
 
-    def __init__(self, render_mode='human', curriculum_level=1, debug_mode=False, player_id=1, opponent_model=None, goal_debug_mode=False):
+    def __init__(self, render_mode='human', curriculum_level=1, debug_mode=False, player_id=1, opponent_model=None, goal_debug_mode=False, steps_per_episode=2000):
         super(FoosballEnv, self).__init__()
 
         self.render_mode = render_mode
@@ -39,7 +39,7 @@ class FoosballEnv(gym.Env):
         self.ball_stuck_counter = 0
         self.max_stuck_steps = 1500
         self.episode_step_count = 0
-        self.max_episode_steps = 50000
+        self.max_episode_steps = steps_per_episode
         
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
         p.setGravity(0, 0, -9.81)

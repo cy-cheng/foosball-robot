@@ -59,14 +59,15 @@ STAGE_INFO = {
     4: {
         "name": "Full Game",
         "description": "Random play - learn complete strategy",
-        "steps": 10_000_000,
+        "steps": 20_000_000,
+        "steps_per_episode": 50_000,
         "focus": "Offense, defense, strategy"
     }
 }
 
 
 def train_stage(stage, load_checkpoint=None, steps=250_000, num_envs=4, 
-                learning_rate=3e-4, render=False):
+                learning_rate=3e-4, render=False, steps_per_episode=2000):
     """Train a specific curriculum stage."""
     
     info = STAGE_INFO[stage]
@@ -113,7 +114,8 @@ def train_stage(stage, load_checkpoint=None, steps=250_000, num_envs=4,
                 return FoosballEnv(
                     render_mode=env_render_mode,
                     curriculum_level=stage,
-                    opponent_model=opponent_model
+                    opponent_model=opponent_model,
+                    steps_per_episode=steps_per_episode
                 )
             return _init
             
@@ -121,7 +123,7 @@ def train_stage(stage, load_checkpoint=None, steps=250_000, num_envs=4,
         model.set_env(env)
         
         # Callback for self-play
-        self_play_callback = SelfPlayCallback(update_freq=50_000)
+        self_play_callback = SelfPlayCallback(update_freq=100_000)
         
         # Train
         print(f"\n🚀 Training Stage {stage} with self-play...\n")
@@ -254,13 +256,15 @@ def main():
         checkpoint = None
         for stage in range(1, 5):
             steps = args.steps if args.steps else STAGE_INFO[stage]["steps"]
+            steps_per_episode = STAGE_INFO[stage].get("steps_per_episode", 2000)
             train_stage(
                 stage=stage,
                 load_checkpoint=checkpoint,
                 steps=steps,
                 num_envs=args.num_envs,
                 learning_rate=args.lr,
-                render=args.render
+                render=args.render,
+                steps_per_episode=steps_per_episode
             )
             checkpoint = f"saves/foosball_stage_{stage}_completed.zip"
     elif args.stage:
