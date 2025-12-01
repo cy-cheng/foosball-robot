@@ -22,7 +22,7 @@ import sys
 from datetime import datetime
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
-from stable_baselines3.common.vec_env import SubprocVecEnv
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
 from foosball_env import FoosballEnv
 
 
@@ -44,17 +44,17 @@ class RewardLoggerCallback(BaseCallback):
     def __init__(self, check_freq: int, verbose: int = 1):
         super(RewardLoggerCallback, self).__init__(verbose)
         self.check_freq = check_freq
-        self.last_mean_reward = None
 
     def _on_step(self) -> bool:
         if self.n_calls % self.check_freq == 0:
-            # Retrieve the current mean episodic reward from the logger
-            # Stable Baselines3 logs this under 'rollout/ep_rew_mean'
-            mean_reward = self.logger.get("rollout/ep_rew_mean")
-            if mean_reward is not None and mean_reward != self.last_mean_reward:
-                if self.verbose > 0:
-                    print(f"Timestep: {self.num_timesteps}, Mean Episode Reward: {mean_reward:.2f}")
-                self.last_mean_reward = mean_reward
+            # The ep_info_buffer is a deque of dicts {'r': reward, 'l': length, 't': timestamp}
+            if hasattr(self.training_env, 'ep_info_buffer'):
+                ep_info_buffer = self.training_env.ep_info_buffer
+                if ep_info_buffer:
+                    # Calculate the mean reward from all episodes in the buffer
+                    mean_reward = sum([info['r'] for info in ep_info_buffer]) / len(ep_info_buffer)
+                    if self.verbose > 0:
+                        print(f"Timestep: {self.num_timesteps}, Mean Episode Reward: {mean_reward:.2f}")
         return True
 
 
@@ -103,7 +103,8 @@ def train_stage(stage, load_checkpoint=None, steps=250_000, num_envs=4,
   Steps: {steps:,}
   Parallel Envs: {num_envs}
   Learning Rate: {learning_rate}
-""")
+"""
+)
     
     # Create directories
     os.makedirs("saves", exist_ok=True)
@@ -119,7 +120,7 @@ def train_stage(stage, load_checkpoint=None, steps=250_000, num_envs=4,
         save_path="saves/",
         name_prefix=f"stage_{stage}_ckpt"
     )
-    reward_logger_callback = RewardLoggerCallback(check_freq=5000) # Log every 5000 timesteps
+    reward_logger_callback = RewardLoggerCallback(check_freq=1000) # Log every 1000 timesteps
 
     if stage == 4:
         print("Setting up self-play for Stage 4...")
@@ -141,7 +142,7 @@ def train_stage(stage, load_checkpoint=None, steps=250_000, num_envs=4,
                 )
             return _init
             
-        env = SubprocVecEnv([make_env(i) for i in range(num_envs)])
+        env = VecMonitor(SubprocVecEnv([make_env(i) for i in range(num_envs)]))
         model.set_env(env)
         
         # Callback for self-play
@@ -169,7 +170,7 @@ def train_stage(stage, load_checkpoint=None, steps=250_000, num_envs=4,
             return _init
         
         print("Creating environments...")
-        env = SubprocVecEnv([make_env(i) for i in range(num_envs)])
+        env = VecMonitor(SubprocVecEnv([make_env(i) for i in range(num_envs)]))
         
         # Load or create model
         if load_checkpoint and os.path.exists(load_checkpoint):
@@ -210,10 +211,12 @@ def train_stage(stage, load_checkpoint=None, steps=250_000, num_envs=4,
     model.save(stage_checkpoint)
     
     print(f"""
+
 ✅ Stage {stage} Complete!
    Saved: {stage_checkpoint}.zip
    Logs: {log_dir}/
-""")
+"""
+)
     
     env.close()
     
