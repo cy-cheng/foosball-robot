@@ -87,7 +87,8 @@ class SymmetricMatch:
         self.env = FoosballEnv(
             render_mode='human' if render else 'computer',
             curriculum_level=4,
-            debug_mode=False
+            debug_mode=False,
+            steps_per_episode=50000
         )
     
     def run_match(self, num_episodes=5, verbose=True):

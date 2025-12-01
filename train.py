@@ -37,6 +37,27 @@ class SelfPlayCallback(BaseCallback):
         return True
 
 
+class RewardLoggerCallback(BaseCallback):
+    """
+    A custom callback to log mean episodic reward to the console.
+    """
+    def __init__(self, check_freq: int, verbose: int = 1):
+        super(RewardLoggerCallback, self).__init__(verbose)
+        self.check_freq = check_freq
+        self.last_mean_reward = None
+
+    def _on_step(self) -> bool:
+        if self.n_calls % self.check_freq == 0:
+            # Retrieve the current mean episodic reward from the logger
+            # Stable Baselines3 logs this under 'rollout/ep_rew_mean'
+            mean_reward = self.logger.get("rollout/ep_rew_mean")
+            if mean_reward is not None and mean_reward != self.last_mean_reward:
+                if self.verbose > 0:
+                    print(f"Timestep: {self.num_timesteps}, Mean Episode Reward: {mean_reward:.2f}")
+                self.last_mean_reward = mean_reward
+        return True
+
+
 STAGE_INFO = {
     1: {
         "name": "Dribble",
@@ -98,6 +119,7 @@ def train_stage(stage, load_checkpoint=None, steps=250_000, num_envs=4,
         save_path="saves/",
         name_prefix=f"stage_{stage}_ckpt"
     )
+    reward_logger_callback = RewardLoggerCallback(check_freq=5000) # Log every 5000 timesteps
 
     if stage == 4:
         print("Setting up self-play for Stage 4...")
@@ -130,7 +152,7 @@ def train_stage(stage, load_checkpoint=None, steps=250_000, num_envs=4,
         try:
             model.learn(
                 total_timesteps=steps,
-                callback=[checkpoint_callback, self_play_callback],
+                callback=[checkpoint_callback, self_play_callback, reward_logger_callback],
                 progress_bar=True
             )
         except KeyboardInterrupt:
@@ -177,7 +199,7 @@ def train_stage(stage, load_checkpoint=None, steps=250_000, num_envs=4,
         try:
             model.learn(
                 total_timesteps=steps,
-                callback=checkpoint_callback,
+                callback=[checkpoint_callback, reward_logger_callback],
                 progress_bar=True
             )
         except KeyboardInterrupt:
@@ -270,13 +292,15 @@ def main():
     elif args.stage:
         # Run a single stage
         steps = args.steps if args.steps else STAGE_INFO[args.stage]["steps"]
+        steps_per_episode = STAGE_INFO[args.stage].get("steps_per_episode", 2000) # Get or default
         train_stage(
             stage=args.stage,
             load_checkpoint=args.load,
             steps=steps,
             num_envs=args.num_envs,
             learning_rate=args.lr,
-            render=args.render
+            render=args.render,
+            steps_per_episode=steps_per_episode
         )
     else:
         parser.print_help()
