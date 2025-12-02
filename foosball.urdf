@@ -103,7 +103,7 @@
   <!-- Rod 1: Team A Goalie (-0.55) [3-Man Goalie] -->
   <joint name="rod_1_slide" type="prismatic">
     <parent link="base_link"/> <child link="rod_1_dummy"/>
-    <origin xyz="-0.55 0 0.15"/> <axis xyz="0 1 0"/>
+    <origin xyz="-0.625 0 0.15"/> <axis xyz="0 1 0"/>
     <limit lower="-0.12" upper="0.12" effort="100" velocity="10"/>
     <dynamics damping="0.5" friction="0.05"/>
   </joint>
@@ -132,7 +132,7 @@
   <!-- Rod 2: Team A Defenders (-0.40) [Narrow Spacing] -->
   <joint name="rod_2_slide" type="prismatic">
     <parent link="base_link"/> <child link="rod_2_dummy"/>
-    <origin xyz="-0.40 0 0.15"/> <axis xyz="0 1 0"/>
+    <origin xyz="-0.45 0 0.15"/> <axis xyz="0 1 0"/>
     <limit lower="-0.18" upper="0.18" effort="100" velocity="10"/>
     <dynamics damping="0.5" friction="0.05"/>
   </joint>
@@ -156,7 +156,7 @@
   <!-- Rod 3: Team B Forwards (-0.25) [ORIGINAL] -->
   <joint name="rod_3_slide" type="prismatic">
     <parent link="base_link"/> <child link="rod_3_dummy"/>
-    <origin xyz="-0.25 0 0.15"/> <axis xyz="0 1 0"/>
+    <origin xyz="-0.275 0 0.15"/> <axis xyz="0 1 0"/>
     <limit lower="-0.12" upper="0.12" effort="100" velocity="10"/>
     <dynamics damping="0.5" friction="0.05"/>
   </joint>
@@ -239,7 +239,7 @@
   <!-- Rod 6: Team A Forwards (0.25) [ORIGINAL] -->
   <joint name="rod_6_slide" type="prismatic">
     <parent link="base_link"/> <child link="rod_6_dummy"/>
-    <origin xyz="0.25 0 0.15"/> <axis xyz="0 1 0"/>
+    <origin xyz="0.275 0 0.15"/> <axis xyz="0 1 0"/>
     <limit lower="-0.12" upper="0.12" effort="100" velocity="10"/>
     <dynamics damping="0.5" friction="0.05"/>
   </joint>
@@ -264,7 +264,7 @@
   <!-- Rod 7: Team B Defenders (0.40) [Narrow Spacing] -->
   <joint name="rod_7_slide" type="prismatic">
     <parent link="base_link"/> <child link="rod_7_dummy"/>
-    <origin xyz="0.40 0 0.15"/> <axis xyz="0 1 0"/>
+    <origin xyz="0.45 0 0.15"/> <axis xyz="0 1 0"/>
     <limit lower="-0.18" upper="0.18" effort="100" velocity="10"/>
     <dynamics damping="0.5" friction="0.05"/>
   </joint>
@@ -288,7 +288,7 @@
   <!-- Rod 8: Team B Goalie (0.55) [3-Man Goalie] -->
   <joint name="rod_8_slide" type="prismatic">
     <parent link="base_link"/> <child link="rod_8_dummy"/>
-    <origin xyz="0.55 0 0.15"/> <axis xyz="0 1 0"/>
+    <origin xyz="0.625 0 0.15"/> <axis xyz="0 1 0"/>
     <limit lower="-0.12" upper="0.12" effort="100" velocity="10"/>
     <dynamics damping="0.5" friction="0.05"/>
   </joint>

@@ -17,7 +17,7 @@ def test_individual_rod_control():
     print("TEST: INDIVIDUAL ROD CONTROL (Team 1 - RED)")
     print("="*80)
     
-    env = FoosballEnv(render_mode='human', curriculum_level=1, player_id=1, steps_per_episode=10000)
+    env = FoosballEnv(render_mode='human', curriculum_level=1, player_id=1, steps_per_episode=20000)
     obs, _ = env.reset()
     
     # Action indices for Team 1:
