@@ -12,7 +12,7 @@ class FoosballEnv(gym.Env):
     """
     metadata = {'render.modes': ['human']}
 
-    def __init__(self, render_mode='human', curriculum_level=1, debug_mode=False, player_id=1, opponent_model=None, goal_debug_mode=False, steps_per_episode=2000):
+    def __init__(self, render_mode='human', curriculum_level=1, debug_mode=False, player_id=1, opponent_model=None, goal_debug_mode=False, steps_per_episode=4000):
         super(FoosballEnv, self).__init__()
 
         self.render_mode = render_mode
@@ -37,7 +37,7 @@ class FoosballEnv(gym.Env):
         self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(obs_space_dim,), dtype=np.float32)
 
         self.ball_stuck_counter = 0
-        self.max_stuck_steps = 1500
+        self.max_stuck_steps = 5000
         self.episode_step_count = 0
         self.max_episode_steps = steps_per_episode
         self.previous_action = np.zeros(self.action_space.shape)
@@ -175,10 +175,10 @@ class FoosballEnv(gym.Env):
     def _curriculum_spawn_ball(self):
         if self.curriculum_level == 1:
             if self.player_id == 1:
-                ball_x, ball_y = np.random.uniform(-0.4, 0.0), np.random.uniform(-0.3, 0.3)
+                ball_x, ball_y = np.random.uniform(-0.6, 0.0), np.random.uniform(-0.3, 0.3)
                 ball_vel = [np.random.uniform(-0.2, -0.1), np.random.uniform(-0.1, 0.1), 0]
             else:
-                ball_x, ball_y = np.random.uniform(0.0, 0.4), np.random.uniform(-0.3, 0.3)
+                ball_x, ball_y = np.random.uniform(0.0, 0.6), np.random.uniform(-0.3, 0.3)
                 ball_vel = [np.random.uniform(0.1, 0.2), np.random.uniform(-0.1, 0.1), 0]
             ball_pos = [ball_x, ball_y, 0.55]
         elif self.curriculum_level == 2:
@@ -186,7 +186,7 @@ class FoosballEnv(gym.Env):
             if self.player_id == 1: ball_vel = [-1, np.random.uniform(-0.5, 0.5), 0]
             else: ball_vel = [1, np.random.uniform(-0.5, 0.5), 0]
         elif self.curriculum_level == 3:
-            speed = 4.5
+            speed = np.random.uniform(3.0, 4.5)
             if self.player_id == 1:
                 spawn_pos = np.array([np.random.uniform(-0.5, -0.4), np.random.uniform(-0.25, 0.25), 0.55])
                 target_pos = np.array([self.goal_line_x_1, np.random.uniform(-0.05, 0.05), 0.55])
@@ -196,7 +196,7 @@ class FoosballEnv(gym.Env):
                 ball_vel = (direction / direction_norm) * speed
                 ball_pos = spawn_pos.tolist()
             else: # player_id == 2
-                spawn_pos = np.array([0.5, np.random.uniform(-0.25, 0.25), 0.55])
+                spawn_pos = np.array([np.random.uniform(0.4, 0.5), np.random.uniform(-0.25, 0.25), 0.55])
                 target_pos = np.array([self.goal_line_x_2, 0, 0.55])
                 direction = target_pos - spawn_pos
                 direction_norm = np.linalg.norm(direction)
@@ -421,7 +421,7 @@ class FoosballEnv(gym.Env):
 
         # Action rate penalty
         action_rate_penalty = np.mean(np.square(self.previous_action - action))
-        reward -= action_rate_penalty * 0.01
+        reward -= action_rate_penalty * 0.0001
 
         # Reward for making contact with the ball
         contact_with_agent = False
@@ -438,7 +438,7 @@ class FoosballEnv(gym.Env):
         # Sparse rewards for goals
         if (self.player_id == 1 and ball_pos[0] > self.goal_line_x_2) or \
            (self.player_id == 2 and ball_pos[0] < self.goal_line_x_1):
-            reward += 2500
+            reward += 3000
             self.goals_this_level += 1
         if (self.player_id == 1 and ball_pos[0] < self.goal_line_x_1) or \
            (self.player_id == 2 and ball_pos[0] > self.goal_line_x_2):
@@ -446,7 +446,10 @@ class FoosballEnv(gym.Env):
 
         # Small penalty for inactivity to encourage exploration
         if np.linalg.norm(ball_vel) < 0.01:
-            reward -= 0.01 
+            reward -= 0.1 
+
+        if self.ball_stuck_counter > 1000:
+            reward -= self.ball_stuck_counter * 0.1
 
         return reward
 
