@@ -246,7 +246,7 @@ class FoosballEnv(gym.Env):
         
         if np.linalg.norm(ball_vel) < 0.01 and self.ball_stuck_counter > 2000:
             # Apply a force towards the center of the table, proportional to the distance from the center
-            force_magnitude = 2.0
+            force_magnitude = 0.5
             nudge_force = [-ball_pos[0] * force_magnitude, -ball_pos[1] * force_magnitude, 0]
             p.applyExternalForce(self.ball_id, -1, nudge_force, ball_pos, p.WORLD_FRAME)
 
@@ -420,8 +420,8 @@ class FoosballEnv(gym.Env):
         self.previous_ball_dist = current_ball_dist
 
         # Action rate penalty
-        action_rate_penalty = np.mean(np.square(self.previous_action - action))
-        reward -= action_rate_penalty * 0.0001
+        # action_rate_penalty = np.mean(np.square(self.previous_action - action))
+        # reward -= action_rate_penalty * 0.0001
 
         # Reward for making contact with the ball
         contact_with_agent = False
@@ -438,18 +438,18 @@ class FoosballEnv(gym.Env):
         # Sparse rewards for goals
         if (self.player_id == 1 and ball_pos[0] > self.goal_line_x_2) or \
            (self.player_id == 2 and ball_pos[0] < self.goal_line_x_1):
-            reward += 3000
+            reward += 40000
             self.goals_this_level += 1
         if (self.player_id == 1 and ball_pos[0] < self.goal_line_x_1) or \
            (self.player_id == 2 and ball_pos[0] > self.goal_line_x_2):
-            reward -= 1000
+            reward -= 10000
 
         # Small penalty for inactivity to encourage exploration
         if np.linalg.norm(ball_vel) < 0.01:
             reward -= 0.1 
 
         if self.ball_stuck_counter > 1000:
-            reward -= self.ball_stuck_counter * 0.1
+            reward -= 0.1
 
         return reward
 
