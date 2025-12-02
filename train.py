@@ -194,7 +194,8 @@ def train_stage(stage, load_checkpoint=None, steps=250_000, num_envs=4,
                 ent_coef=0.02,       # Increased from 0.01 for more exploration
                 verbose=1,
                 tensorboard_log=log_dir,
-                policy_kwargs=dict(net_arch=[128, 128])  # Larger network for better capacity
+                # Increased network capacity from default [64, 64] to [128, 128] for better learning
+                policy_kwargs=dict(net_arch=[128, 128])
             )
         
         # Train

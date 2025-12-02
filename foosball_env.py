@@ -25,7 +25,9 @@ class FoosballEnv(gym.Env):
         self.player_id = player_id
         self.opponent_model = opponent_model
         self.goals_this_level = 0
-        self.last_contact = False  # Track contact state for one-time reward
+        # Track contact state to prevent reward explosion: give contact bonus only once per 
+        # contact event rather than every simulation step (which would accumulate to thousands)
+        self.last_contact = False
 
         if self.render_mode == 'human':
             self.client = p.connect(p.GUI)
@@ -43,6 +45,9 @@ class FoosballEnv(gym.Env):
         self.max_episode_steps = steps_per_episode
         self.previous_action = np.zeros(self.action_space.shape)
         self.previous_ball_dist = 0
+        
+        # Configurable reward parameters for easier tuning
+        self.contact_reward = 50  # One-time bonus for making contact with ball
         
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
         p.setGravity(0, 0, -9.81)
@@ -420,7 +425,7 @@ class FoosballEnv(gym.Env):
         
         # Only give contact reward on first contact (state change)
         if contact_with_agent and not self.last_contact:
-            reward += 50  # One-time bonus, reduced from 100 per step
+            reward += self.contact_reward  # One-time bonus, reduced from 100 per step
         self.last_contact = contact_with_agent
 
         # FIX: Rebalanced sparse rewards for goals
