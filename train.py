@@ -80,7 +80,7 @@ STAGE_INFO = {
     4: {
         "name": "Full Game",
         "description": "Random play - learn complete strategy",
-        "steps": 20_000_000,
+        "steps": 25_000_000,
         "steps_per_episode": 50_000,
         "focus": "Offense, defense, strategy"
     }
