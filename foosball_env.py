@@ -25,6 +25,7 @@ class FoosballEnv(gym.Env):
         self.player_id = player_id
         self.opponent_model = opponent_model
         self.goals_this_level = 0
+        self.last_contact = False  # Track contact state for one-time reward
 
         if self.render_mode == 'human':
             self.client = p.connect(p.GUI)
@@ -37,7 +38,7 @@ class FoosballEnv(gym.Env):
         self.observation_space = gym.spaces.Box(low=-np.inf, high=np.inf, shape=(obs_space_dim,), dtype=np.float32)
 
         self.ball_stuck_counter = 0
-        self.max_stuck_steps = 5000
+        self.max_stuck_steps = 2000  # FIX: Reduced from 5000 to 2000 (~8 seconds at 240Hz)
         self.episode_step_count = 0
         self.max_episode_steps = steps_per_episode
         self.previous_action = np.zeros(self.action_space.shape)
@@ -174,13 +175,13 @@ class FoosballEnv(gym.Env):
 
     def _curriculum_spawn_ball(self):
         if self.curriculum_level == 1:
+            # Stage 1: Stationary ball for dribbling practice
             if self.player_id == 1:
                 ball_x, ball_y = np.random.uniform(-0.6, 0.0), np.random.uniform(-0.3, 0.3)
-                ball_vel = [np.random.uniform(-0.2, -0.1), np.random.uniform(-0.1, 0.1), 0]
             else:
                 ball_x, ball_y = np.random.uniform(0.0, 0.6), np.random.uniform(-0.3, 0.3)
-                ball_vel = [np.random.uniform(0.1, 0.2), np.random.uniform(-0.1, 0.1), 0]
             ball_pos = [ball_x, ball_y, 0.55]
+            ball_vel = [0, 0, 0]  # FIX: Stationary ball for Stage 1
         elif self.curriculum_level == 2:
             ball_pos = [0, 0, 0.55]
             if self.player_id == 1: ball_vel = [-1, np.random.uniform(-0.5, 0.5), 0]
@@ -217,6 +218,7 @@ class FoosballEnv(gym.Env):
                 self._set_opponent_rods_to_90_degrees()
                 p.stepSimulation()
         self.ball_stuck_counter, self.episode_step_count, self.goals_this_level = 0, 0, 0
+        self.last_contact = False  # Reset contact tracking
         return self._get_obs(), {}
 
     def step(self, action, opponent_action=None):
@@ -335,7 +337,8 @@ class FoosballEnv(gym.Env):
             lower, upper = self.joint_limits[joint_id]
             scaled[i] = lower + (action[i] + 1) / 2 * (upper - lower)
         for i, joint_id in enumerate(revs):
-            scaled[i + 4] = action[i + 4] * 10
+            # FIX: Scale rotation actions properly to max_vel instead of arbitrary *10
+            scaled[i + 4] = action[i + 4] * self.max_vel
         return scaled
 
     def _apply_action(self, scaled_action, player_id):
@@ -372,58 +375,41 @@ class FoosballEnv(gym.Env):
         ball_vel, _ = p.getBaseVelocity(self.ball_id)
         reward = 0
 
-        # Reward for ball velocity towards opponent's goal
+        # FIX: Reward for ball velocity towards opponent's goal (rebalanced scale)
         goal_x = self.goal_line_x_2 if self.player_id == 1 else self.goal_line_x_1
-        reward += (ball_vel[0] if self.player_id == 1 else -ball_vel[0]) * 10
+        # Use ball velocity in the correct direction (positive toward goal for both players)
+        velocity_component = ball_vel[0] if self.player_id == 1 else -ball_vel[0]
+        reward += velocity_component * 1.0  # Reduced from *10 to *1.0 for better balance
         
-        # Penalty for distance from opponent's goal
-        reward -= 0.001 * abs(ball_pos[0] - goal_x)
+        # FIX: Distance-to-goal reward (clearer metric)
+        ball_to_goal_dist = abs(ball_pos[0] - goal_x)
+        reward -= 0.1 * ball_to_goal_dist  # Increased from 0.001 to 0.1 for stronger signal
 
-        # Closest Player-Ball Distance Reward
+        # Closest Player-Ball Distance Reward (encourages positioning)
         agent_players_by_rod = self.team1_players_by_rod if self.player_id == 1 else self.team2_players_by_rod
         total_dist_reward = 0
         
         for rod_num, player_links in agent_players_by_rod.items():
             min_dist_for_rod = float('inf')
-            closest_player_y = 0
             for link_idx in player_links:
                 link_state = p.getLinkState(self.table_id, link_idx)
                 player_y = link_state[0][1]
                 dist = abs(player_y - ball_pos[1])
                 if dist < min_dist_for_rod:
                     min_dist_for_rod = dist
-                    closest_player_y = player_y
             
             total_dist_reward -= min_dist_for_rod
 
-        reward += total_dist_reward * 0.1
+        reward += total_dist_reward * 0.5  # Increased from 0.1 to 0.5 for stronger positioning signal
 
-        # Potential-based reward for moving closer to the ball
-        # This uses the average of the closest players on each rod
-        avg_closest_player_y = 0
-        if agent_players_by_rod:
-            for rod_num, player_links in agent_players_by_rod.items():
-                min_dist_for_rod = float('inf')
-                closest_player_y = 0
-                for link_idx in player_links:
-                    link_state = p.getLinkState(self.table_id, link_idx)
-                    player_y = link_state[0][1]
-                    dist = abs(player_y - ball_pos[1])
-                    if dist < min_dist_for_rod:
-                        min_dist_for_rod = dist
-                        closest_player_y = player_y
-                avg_closest_player_y += closest_player_y
-            avg_closest_player_y /= len(agent_players_by_rod)
+        # FIX: Potential-based reward for ball moving toward goal (not toward center)
+        # Calculate distance from ball to goal
+        current_ball_to_goal = abs(ball_pos[0] - goal_x)
+        reward += (self.previous_ball_dist - current_ball_to_goal) * 1.0  # Increased from 0.1
+        self.previous_ball_dist = current_ball_to_goal
 
-        current_ball_dist = np.linalg.norm(np.array(ball_pos[:2]) - np.array([0, avg_closest_player_y]))
-        reward += (self.previous_ball_dist - current_ball_dist) * 0.1
-        self.previous_ball_dist = current_ball_dist
-
-        # Action rate penalty
-        # action_rate_penalty = np.mean(np.square(self.previous_action - action))
-        # reward -= action_rate_penalty * 0.0001
-
-        # Reward for making contact with the ball
+        # FIX: One-time contact reward instead of continuous
+        # Only reward the first step of contact, not every step
         contact_with_agent = False
         agent_player_links = self.team1_player_links if self.player_id == 1 else self.team2_player_links
         for link_idx in agent_player_links:
@@ -432,24 +418,27 @@ class FoosballEnv(gym.Env):
                 contact_with_agent = True
                 break
         
-        if contact_with_agent:
-            reward += 100
+        # Only give contact reward on first contact (state change)
+        if contact_with_agent and not self.last_contact:
+            reward += 50  # One-time bonus, reduced from 100 per step
+        self.last_contact = contact_with_agent
 
-        # Sparse rewards for goals
+        # FIX: Rebalanced sparse rewards for goals
         if (self.player_id == 1 and ball_pos[0] > self.goal_line_x_2) or \
            (self.player_id == 2 and ball_pos[0] < self.goal_line_x_1):
-            reward += 40000
+            reward += 1000  # Reduced from 40000 to match dense reward scale
             self.goals_this_level += 1
         if (self.player_id == 1 and ball_pos[0] < self.goal_line_x_1) or \
            (self.player_id == 2 and ball_pos[0] > self.goal_line_x_2):
-            reward -= 10000
+            reward -= 1000  # Reduced from 10000 to match dense reward scale
 
         # Small penalty for inactivity to encourage exploration
         if np.linalg.norm(ball_vel) < 0.01:
             reward -= 0.1 
 
-        if self.ball_stuck_counter > 1000:
-            reward -= 0.1
+        # Remove redundant stuck counter penalty (already handled in termination)
+        # if self.ball_stuck_counter > 1000:
+        #     reward -= 0.1
 
         return reward
 
@@ -462,7 +451,8 @@ class FoosballEnv(gym.Env):
         table_aabb = p.getAABB(self.table_id)
         if not (table_aabb[0][0] - 0.1 < ball_pos[0] < table_aabb[1][0] + 0.1 and table_aabb[0][1] - 0.1 < ball_pos[1] < table_aabb[1][1] + 0.1):
             truncated = True
-        if np.linalg.norm(ball_vel) < 0.001: self.ball_stuck_counter += 1
+        # FIX: Increased threshold from 0.001 to 0.01 to avoid false positives
+        if np.linalg.norm(ball_vel) < 0.01: self.ball_stuck_counter += 1
         else: self.ball_stuck_counter = 0
         if self.ball_stuck_counter > self.max_stuck_steps: truncated = True
         if self.episode_step_count >= self.max_episode_steps: truncated = True
