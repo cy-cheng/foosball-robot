@@ -145,8 +145,8 @@ def train_stage(stage, load_checkpoint=None, steps=250_000, num_envs=4,
         env = VecMonitor(SubprocVecEnv([make_env(i) for i in range(num_envs)]))
         model.set_env(env)
         
-        # Callback for self-play
-        self_play_callback = SelfPlayCallback(update_freq=100_000)
+        # FIX: Self-play callback with more frequent updates (every 20K instead of 100K)
+        self_play_callback = SelfPlayCallback(update_freq=20_000)
         
         # Train
         print(f"\n🚀 Training Stage {stage} with self-play...\n")
@@ -180,19 +180,22 @@ def train_stage(stage, load_checkpoint=None, steps=250_000, num_envs=4,
             print(f"   Model loaded and environment set!")
         else:
             print(f"🆕 Creating new model for Stage {stage}")
+            # FIX: Improved hyperparameters for continuous control and stable learning
             model = PPO(
                 "MlpPolicy",
                 env,
                 learning_rate=learning_rate,
-                batch_size=64,
+                batch_size=256,      # Increased from 64 for better sample efficiency
                 n_steps=2048,
                 n_epochs=10,
                 gamma=0.99,
                 gae_lambda=0.95,
                 clip_range=0.2,
-                ent_coef=0.01,
+                ent_coef=0.02,       # Increased from 0.01 for more exploration
                 verbose=1,
-                tensorboard_log=log_dir
+                tensorboard_log=log_dir,
+                # Increased network capacity from default [64, 64] to [128, 128] for better learning
+                policy_kwargs=dict(net_arch=[128, 128])
             )
         
         # Train
