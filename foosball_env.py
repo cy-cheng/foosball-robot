@@ -239,6 +239,7 @@ class FoosballEnv(gym.Env):
         elif self.curriculum_level == 4 and self.opponent_model:
             mirrored_obs = self._get_mirrored_obs()
             opponent_action, _ = self.opponent_model.predict(mirrored_obs, deterministic=True)
+            opponent_action *= -1 # Mirror the entire action
             scaled_opponent_action = self._scale_action(opponent_action, 3 - self.player_id)
             self._apply_action(scaled_opponent_action, 3 - self.player_id)
         elif opponent_action is None:
@@ -271,8 +272,8 @@ class FoosballEnv(gym.Env):
 
         # Mirrored observation for the opponent (team 2)
         # The opponent sees itself as team 1, and the agent as team 2.
-        mirrored_ball_pos = (-ball_pos[0], ball_pos[1], ball_pos[2])
-        mirrored_ball_vel = (-ball_vel[0], ball_vel[1], ball_vel[2])
+        mirrored_ball_pos = (-ball_pos[0], -ball_pos[1], ball_pos[2])
+        mirrored_ball_vel = (-ball_vel[0], -ball_vel[1], ball_vel[2])
         
         # The opponent's joints are now team 1, and the agent's joints are team 2
         mirrored_joint_pos = team2_pos + team1_pos
