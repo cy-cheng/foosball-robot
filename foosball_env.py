@@ -465,7 +465,7 @@ class FoosballEnv(gym.Env):
         if np.linalg.norm(ball_vel) < 0.001: self.ball_stuck_counter += 1
         else: self.ball_stuck_counter = 0
         if self.ball_stuck_counter > self.max_stuck_steps: truncated = True
-        if self.episode_step_count >= self.max_episode_steps: truncated = True
+        if self.episode_step_count > self.max_episode_steps: truncated = True
         return terminated, truncated
 
     def close(self):
