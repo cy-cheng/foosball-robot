@@ -105,7 +105,7 @@ class SymmetricMatch:
             done = False
             episode_reward = 0
             episode_length = 0
-            
+
             while not done:
                 # Team 1 action
                 action1, _ = self.model.predict(obs, deterministic=True)
@@ -117,9 +117,14 @@ class SymmetricMatch:
                 action2, _ = self.model.predict(mirrored_obs, deterministic=True)
                 
                 obs, reward, terminated, truncated, _ = self.env.step(action1, opponent_action=action2)
-                
+
                 episode_reward += reward
                 episode_length += 1
+
+                if episode_length % 1000 == 0:
+                    if verbose:
+                        print(f"  Step {episode_length}: Current Reward={episode_reward:.2f}")
+
                 done = terminated or truncated
             
             # This part is tricky because the env is from perspective of player 1

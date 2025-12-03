@@ -190,7 +190,7 @@ def train_stage(stage, load_checkpoint=None, steps=250_000, num_envs=4,
                 gamma=0.99,
                 gae_lambda=0.95,
                 clip_range=0.2,
-                ent_coef=0.01,
+                ent_coef=0.03,
                 verbose=1,
                 tensorboard_log=log_dir
             )

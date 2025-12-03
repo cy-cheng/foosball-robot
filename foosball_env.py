@@ -42,6 +42,11 @@ class FoosballEnv(gym.Env):
         self.max_episode_steps = steps_per_episode
         self.previous_action = np.zeros(self.action_space.shape)
         self.previous_ball_dist = 0
+        # For new stagnation penalty
+        self.last_slide_positions = np.zeros(4)
+        self.slide_stagnation_counter = 0
+        self.last_spin_velocities = np.zeros(4)
+        self.spin_stagnation_counter = 0
         
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
         p.setGravity(0, 0, -9.81)
@@ -217,6 +222,11 @@ class FoosballEnv(gym.Env):
                 self._set_opponent_rods_to_90_degrees()
                 p.stepSimulation()
         self.ball_stuck_counter, self.episode_step_count, self.goals_this_level = 0, 0, 0
+        # For new stagnation penalty
+        self.last_slide_positions = np.zeros(4)
+        self.slide_stagnation_counter = 0
+        self.last_spin_velocities = np.zeros(4)
+        self.spin_stagnation_counter = 0
         return self._get_obs(), {}
 
     def step(self, action, opponent_action=None):
@@ -239,16 +249,6 @@ class FoosballEnv(gym.Env):
             self._apply_action(scaled_opponent_action, 3 - self.player_id)
             
         p.stepSimulation()
-
-        # If the ball is stuck, apply a gentle nudge towards the center
-        ball_pos, _ = p.getBasePositionAndOrientation(self.ball_id)
-        ball_vel, _ = p.getBaseVelocity(self.ball_id)
-        
-        if np.linalg.norm(ball_vel) < 0.01 and self.ball_stuck_counter > 2000:
-            # Apply a force towards the center of the table, proportional to the distance from the center
-            force_magnitude = 0.5
-            nudge_force = [-ball_pos[0] * force_magnitude, -ball_pos[1] * force_magnitude, 0]
-            p.applyExternalForce(self.ball_id, -1, nudge_force, ball_pos, p.WORLD_FRAME)
 
         obs = self._get_obs()
         reward = self._compute_reward(action)
@@ -372,84 +372,61 @@ class FoosballEnv(gym.Env):
         ball_vel, _ = p.getBaseVelocity(self.ball_id)
         reward = 0
 
-        # Reward for ball velocity towards opponent's goal
-        goal_x = self.goal_line_x_2 if self.player_id == 1 else self.goal_line_x_1
-        reward += (ball_vel[0] if self.player_id == 1 else -ball_vel[0]) * 10
-        
-        # Penalty for distance from opponent's goal
-        reward -= 0.001 * abs(ball_pos[0] - goal_x)
+        # --- Sparse Rewards for Goals ---
+        if (self.player_id == 1 and ball_pos[0] > self.goal_line_x_2) or \
+           (self.player_id == 2 and ball_pos[0] < self.goal_line_x_1):
+            reward += 100  # Goal for agent
+        if (self.player_id == 1 and ball_pos[0] < self.goal_line_x_1) or \
+           (self.player_id == 2 and ball_pos[0] > self.goal_line_x_2):
+            reward -= 100  # Own goal
 
-        # Closest Player-Ball Distance Reward
-        agent_players_by_rod = self.team1_players_by_rod if self.player_id == 1 else self.team2_players_by_rod
-        total_dist_reward = 0
-        
-        for rod_num, player_links in agent_players_by_rod.items():
-            min_dist_for_rod = float('inf')
-            closest_player_y = 0
-            for link_idx in player_links:
-                link_state = p.getLinkState(self.table_id, link_idx)
-                player_y = link_state[0][1]
-                dist = abs(player_y - ball_pos[1])
-                if dist < min_dist_for_rod:
-                    min_dist_for_rod = dist
-                    closest_player_y = player_y
-            
-            total_dist_reward -= min_dist_for_rod
+        # --- Dense Rewards and Penalties ---
 
-        reward += total_dist_reward * 0.1
+        # 1. Reward for ball velocity towards opponent's goal
+        reward += (ball_vel[0] if self.player_id == 1 else -ball_vel[0]) * 10.0
 
-        # Potential-based reward for moving closer to the ball
-        # This uses the average of the closest players on each rod
-        avg_closest_player_y = 0
-        if agent_players_by_rod:
-            for rod_num, player_links in agent_players_by_rod.items():
-                min_dist_for_rod = float('inf')
-                closest_player_y = 0
-                for link_idx in player_links:
-                    link_state = p.getLinkState(self.table_id, link_idx)
-                    player_y = link_state[0][1]
-                    dist = abs(player_y - ball_pos[1])
-                    if dist < min_dist_for_rod:
-                        min_dist_for_rod = dist
-                        closest_player_y = player_y
-                avg_closest_player_y += closest_player_y
-            avg_closest_player_y /= len(agent_players_by_rod)
-
-        current_ball_dist = np.linalg.norm(np.array(ball_pos[:2]) - np.array([0, avg_closest_player_y]))
-        reward += (self.previous_ball_dist - current_ball_dist) * 0.1
-        self.previous_ball_dist = current_ball_dist
-
-        # Action rate penalty
-        # action_rate_penalty = np.mean(np.square(self.previous_action - action))
-        # reward -= action_rate_penalty * 0.0001
-
-        # Reward for making contact with the ball
+        # 2. Reward for making contact with the ball
         contact_with_agent = False
         agent_player_links = self.team1_player_links if self.player_id == 1 else self.team2_player_links
         for link_idx in agent_player_links:
-            contact_points = p.getContactPoints(bodyA=self.table_id, bodyB=self.ball_id, linkIndexA=link_idx)
-            if contact_points:
+            if p.getContactPoints(bodyA=self.table_id, bodyB=self.ball_id, linkIndexA=link_idx):
                 contact_with_agent = True
                 break
-        
         if contact_with_agent:
-            reward += 100
+            reward += 0.5
 
-        # Sparse rewards for goals
-        if (self.player_id == 1 and ball_pos[0] > self.goal_line_x_2) or \
-           (self.player_id == 2 and ball_pos[0] < self.goal_line_x_1):
-            reward += 40000
-            self.goals_this_level += 1
-        if (self.player_id == 1 and ball_pos[0] < self.goal_line_x_1) or \
-           (self.player_id == 2 and ball_pos[0] > self.goal_line_x_2):
-            reward -= 10000
+        # 3. Refined penalties for agent stagnation
+        agent_slides = self.team1_slide_joints if self.player_id == 1 else self.team2_slide_joints
+        agent_spins = self.team1_rev_joints if self.player_id == 1 else self.team2_rev_joints
 
-        # Small penalty for inactivity to encourage exploration
+        # 3a. Positional (slide) stagnation penalty
+        current_slide_pos = np.array([state[0] for state in p.getJointStates(self.table_id, agent_slides)])
+        if np.linalg.norm(current_slide_pos - self.last_slide_positions) < 0.001:
+            self.slide_stagnation_counter += 1
+        else:
+            self.slide_stagnation_counter = 0
+        if self.slide_stagnation_counter > 150:
+            reward -= 0.05
+        self.last_slide_positions = current_slide_pos
+
+        # 3b. Rotational (spin) stagnation penalty
+        current_spin_vels = np.array([state[1] for state in p.getJointStates(self.table_id, agent_spins)])
+        if np.linalg.norm(current_spin_vels - self.last_spin_velocities) < 0.01:
+            self.spin_stagnation_counter += 1
+        else:
+            self.spin_stagnation_counter = 0
+        if self.spin_stagnation_counter > 100:
+            reward -= 0.05
+        self.last_spin_velocities = current_spin_vels
+
+        # 4. Penalty for the ball being stuck
         if np.linalg.norm(ball_vel) < 0.01:
-            reward -= 0.1 
+            self.ball_stuck_counter += 1
+        else:
+            self.ball_stuck_counter = 0
 
-        if self.ball_stuck_counter > 1000:
-            reward -= 0.1
+        if self.ball_stuck_counter > 500:
+            reward -= 1.0
 
         return reward
 
