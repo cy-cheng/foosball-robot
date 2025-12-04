@@ -104,6 +104,16 @@ class FoosballEnv(gym.Env):
             self._add_debug_sliders()
 
     def update_opponent_model(self, state_dict):
+        # In Stage 4, the env is initialized with opponent_model=None.
+        # We need to create a placeholder model here so we can load the state dict.
+        if self.opponent_model is None and self.curriculum_level == 4:
+            from stable_baselines3 import PPO  # Local import to avoid circular dependency
+            
+            # Create a shell PPO model. The policy and parameters don't matter much
+            # as they will be immediately overwritten by the state_dict.
+            self.opponent_model = PPO("MlpPolicy", self, verbose=0)
+            self.opponent_model._setup_model()
+
         if self.opponent_model:
             self.opponent_model.policy.load_state_dict(state_dict)
 
@@ -238,7 +248,7 @@ class FoosballEnv(gym.Env):
             self._set_opponent_rods_to_90_degrees()
         elif self.curriculum_level == 4 and self.opponent_model:
             mirrored_obs = self._get_mirrored_obs()
-            opponent_action, _ = self.opponent_model.predict(mirrored_obs, deterministic=True)
+            opponent_action, _ = self.opponent_model.predict(mirrored_obs, deterministic=False)
             opponent_action *= -1 # Mirror the entire action
             scaled_opponent_action = self._scale_action(opponent_action, 3 - self.player_id)
             self._apply_action(scaled_opponent_action, 3 - self.player_id)
