@@ -44,4 +44,8 @@ create logic that Modify reset() to spawn the ball differently based on the leve
 
     Stuck Ball Handling: Implement a counter. If the ball velocity is near zero for N steps, truncate the episode (return truncated=True) and apply a small negative reward to discourage stalling.
 
+5. Collision Reward
+
+    The collision reward is working correctly. The logic in `_parse_joints_and_links` correctly identifies the player links, and `_compute_reward` correctly uses `p.getContactPoints` to check for collisions with these links.
+
 Output Requirements: Provide the complete, runnable code for foosball_env.py. Ensure the class inherits from gym.Env and handles the PyBullet connection logic (GUI vs. DIRECT) efficiently.

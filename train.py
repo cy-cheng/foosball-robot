@@ -58,6 +58,66 @@ class RewardLoggerCallback(BaseCallback):
         return True
 
 
+#!/usr/bin/env python3
+"""
+Stage-by-stage training with checkpoint loading.
+
+Usage:
+  # Stage 1 (fresh start)
+  uv run train_stages.py --stage 1
+  
+  # Stage 2 (load Stage 1)
+  uv run train_stages.py --stage 2 --load saves/foosball_stage_1_completed.zip
+  
+  # Stage 3 (load Stage 2)
+  uv run train_stages.py --stage 3 --load saves/foosball_stage_2_completed.zip
+  
+  # Stage 4 (load Stage 3)
+  uv run train_stages.py --stage 4 --load saves/foosball_stage_3_completed.zip
+"""
+
+import os
+import argparse
+import sys
+from datetime import datetime
+from stable_baselines3 import PPO
+from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
+from foosball_env import FoosballEnv
+
+
+class SelfPlayCallback(BaseCallback):
+    def __init__(self, update_freq: int, verbose=0):
+        super(SelfPlayCallback, self).__init__(verbose)
+        self.update_freq = update_freq
+
+    def _on_step(self) -> bool:
+        if self.n_calls % self.update_freq == 0:
+            self.training_env.env_method("update_opponent_model", self.model.policy.to("cpu").state_dict())
+        return True
+
+
+class RewardLoggerCallback(BaseCallback):
+    """
+    A custom callback to log mean episodic reward to the console.
+    """
+    def __init__(self, check_freq: int, verbose: int = 1):
+        super(RewardLoggerCallback, self).__init__(verbose)
+        self.check_freq = check_freq
+
+    def _on_step(self) -> bool:
+        if self.n_calls % self.check_freq == 0:
+            # The ep_info_buffer is a deque of dicts {'r': reward, 'l': length, 't': timestamp}
+            if hasattr(self.training_env, 'ep_info_buffer'):
+                ep_info_buffer = self.training_env.ep_info_buffer
+                if ep_info_buffer:
+                    # Calculate the mean reward from all episodes in the buffer
+                    mean_reward = sum([info['r'] for info in ep_info_buffer]) / len(ep_info_buffer)
+                    if self.verbose > 0:
+                        print(f"Timestep: {self.num_timesteps}, Mean Episode Reward: {mean_reward:.2f}")
+        return True
+
+
 STAGE_INFO = {
     1: {
         "name": "Dribble",
@@ -125,25 +185,61 @@ def train_stage(stage, load_checkpoint=None, steps=250_000, num_envs=4,
     if stage == 4:
         print("Setting up self-play for Stage 4...")
         
-        # Load the model from stage 3 as the main agent
-        model = PPO.load(load_checkpoint)
-        
-        # Create a separate opponent model
-        opponent_model = PPO.load(load_checkpoint)
-
         def make_env(rank):
             def _init():
                 env_render_mode = 'human' if (rank == 0 and render) else 'direct'
+                # Opponent model is passed at the environment level
                 return FoosballEnv(
                     render_mode=env_render_mode,
                     curriculum_level=stage,
-                    opponent_model=opponent_model,
+                    opponent_model=None, # Will be set later
                     steps_per_episode=steps_per_episode
                 )
             return _init
-            
+
+        # Create the vectorized environment
         env = VecMonitor(SubprocVecEnv([make_env(i) for i in range(num_envs)]))
-        model.set_env(env)
+
+        # Handle model loading or creation
+        if load_checkpoint and os.path.exists(load_checkpoint):
+            print(f"✅ Loading checkpoint for agent and opponent: {load_checkpoint}")
+            model = PPO.load(load_checkpoint, env=env)
+            opponent_model = PPO.load(load_checkpoint)
+        else:
+            print("🆕 No valid checkpoint provided for Stage 4. Creating a new model from scratch.")
+            model_params = {
+                "policy": "MlpPolicy",
+                "learning_rate": learning_rate,
+                "batch_size": 64,
+                "n_steps": 2048,
+                "n_epochs": 10,
+                "gamma": 0.99,
+                "gae_lambda": 0.95,
+                "clip_range": 0.2,
+                "ent_coef": 0.03,
+                "verbose": 1,
+                "tensorboard_log": log_dir
+            }
+            model = PPO(env=env, **model_params)
+            
+            # Create a structurally identical opponent model, it doesn't need an env
+            # The policy class is passed directly, so remove it from the params dict
+            opponent_model_params = model_params.copy()
+            opponent_model_params.pop("policy", None)
+            opponent_model_params.pop("tensorboard_log", None)
+            opponent_model = PPO(
+                policy=model.policy.__class__, 
+                env=None, 
+                _init_setup_model=False, # We'll set it up manually
+                **opponent_model_params
+            )
+            opponent_model.observation_space = model.observation_space
+            opponent_model.action_space = model.action_space
+            opponent_model.n_envs = model.n_envs
+            opponent_model._setup_model()
+
+        # Set the opponent model in each environment
+        env.env_method("update_opponent_model", opponent_model.policy.state_dict(), indices=range(num_envs))
         
         # Callback for self-play
         self_play_callback = SelfPlayCallback(update_freq=100_000)
@@ -306,8 +402,10 @@ def main():
             steps_per_episode=steps_per_episode
         )
     else:
-        parser.print_help()
+        parser.print__help()
 
 
 if __name__ == "__main__":
     main()
+
+

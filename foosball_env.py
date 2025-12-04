@@ -383,6 +383,22 @@ class FoosballEnv(gym.Env):
 
         # --- Dense Rewards and Penalties ---
 
+        # 1a. Dense reward for minimizing distance to ball
+        agent_player_links = self.team1_player_links if self.player_id == 1 else self.team2_player_links
+        min_dist_to_ball = float('inf')
+        
+        for link_idx in agent_player_links:
+            link_state = p.getLinkState(self.table_id, link_idx)
+            link_pos = np.array(link_state[0]) # This is the link's CoM
+            dist = np.linalg.norm(np.array(ball_pos) - link_pos)
+            if dist < min_dist_to_ball:
+                min_dist_to_ball = dist
+        
+        # Reward is higher when the player is closer to the ball.
+        # The value is scaled to be significant but not overpower the goal reward.
+        distance_reward = 0.5 * (1 - np.tanh(min_dist_to_ball))
+        reward += distance_reward
+
         # 1. Reward for ball velocity towards opponent's goal
         reward += (ball_vel[0] if self.player_id == 1 else -ball_vel[0]) * 10.0
 
@@ -394,7 +410,7 @@ class FoosballEnv(gym.Env):
                 contact_with_agent = True
                 break
         if contact_with_agent:
-            reward += 0.5
+            reward += 10.0
 
         # 3. Refined penalties for agent stagnation
         agent_slides = self.team1_slide_joints if self.player_id == 1 else self.team2_slide_joints
@@ -427,7 +443,7 @@ class FoosballEnv(gym.Env):
             self.ball_stuck_counter = 0
 
         if self.ball_stuck_counter > 500:
-            reward -= 1.0
+            reward -= np.sqrt(self.ball_stuck_counter) * 0.01
 
         return reward
 
@@ -449,82 +465,157 @@ class FoosballEnv(gym.Env):
     def close(self):
         p.disconnect(self.client)
 
-    def run_goal_debug_loop(self):
-        """
-        An interactive debug loop for visualizing goal lines and manually controlling the ball,
-        now with real-time contact status reporting.
-        """
-        if not self.goal_debug_mode:
-            print("Goal debug mode is not enabled. Please instantiate Env with goal_debug_mode=True.")
-            return
+        def run_goal_debug_loop(self):
 
-        print("\n" + "="*80 + "\nINTERACTIVE DEBUG MODE\n" + "="*80)
-        print(" - Use ARROW KEYS to move the ball.")
-        print(" - Use the sliders to adjust the goal lines.")
-        print(" - Contact status with agent/opponent rods will be printed on change.")
-        print(" - Press ESC or close the window to exit.")
-        
-        table_aabb = p.getAABB(self.table_id)
-        y_min, y_max = table_aabb[0][1], table_aabb[1][1]
-        z_pos = 0.55  # Approximate height of the playing surface
+            """
 
-        line1_id, line2_id = None, None
-        move_speed = 0.01
-        last_contact_status = "None"
+            An interactive debug loop for visualizing goal lines and manually controlling the ball,
 
-        try:
-            while True:
-                # Keyboard events for ball control
-                keys = p.getKeyboardEvents()
-                ball_pos, ball_orn = p.getBasePositionAndOrientation(self.ball_id)
-                new_pos = list(ball_pos)
+            now with real-time contact status reporting.
 
-                if p.B3G_LEFT_ARROW in keys and keys[p.B3G_LEFT_ARROW] & p.KEY_IS_DOWN: new_pos[0] -= move_speed
-                if p.B3G_RIGHT_ARROW in keys and keys[p.B3G_RIGHT_ARROW] & p.KEY_IS_DOWN: new_pos[0] += move_speed
-                if p.B3G_UP_ARROW in keys and keys[p.B3G_UP_ARROW] & p.KEY_IS_DOWN: new_pos[1] += move_speed
-                if p.B3G_DOWN_ARROW in keys and keys[p.B3G_DOWN_ARROW] & p.KEY_IS_DOWN: new_pos[1] -= move_speed
-                p.resetBasePositionAndOrientation(self.ball_id, new_pos, ball_orn)
+            """
 
-                # --- Contact Detection Logic ---
-                current_contact_status = "None"
-                agent_player_links = self.team1_player_links if self.player_id == 1 else self.team2_player_links
-                opponent_player_links = self.team2_player_links if self.player_id == 1 else self.team1_player_links
+            if not self.goal_debug_mode:
 
-                # Check for contact with agent rods
-                for link_idx in agent_player_links:
-                    if p.getContactPoints(bodyA=self.table_id, bodyB=self.ball_id, linkIndexA=link_idx):
-                        current_contact_status = f"Contact with AGENT (Player {self.player_id})"
-                        break
-                
-                # If no agent contact, check for opponent contact
-                if current_contact_status == "None":
-                    for link_idx in opponent_player_links:
+                print("Goal debug mode is not enabled. Please instantiate Env with goal_debug_mode=True.")
+
+                return
+
+    
+
+            print("\n" + "="*80 + "\nINTERACTIVE DEBUG MODE\n" + "="*80)
+
+            print(" - Use ARROW KEYS to move the ball.")
+
+            print(" - Use the sliders to adjust the goal lines.")
+
+            print(" - Contact status with agent/opponent rods will be printed on change.")
+
+            print(" - Press ESC or close the window to exit.")
+
+            
+
+            table_aabb = p.getAABB(self.table_id)
+
+            y_min, y_max = table_aabb[0][1], table_aabb[1][1]
+
+            z_pos = 0.55  # Approximate height of the playing surface
+
+    
+
+            line1_id, line2_id = None, None
+
+            move_speed = 0.01
+
+            last_contact_status = "None"
+
+    
+
+            try:
+
+                while True:
+
+                    # Keyboard events for ball control
+
+                    keys = p.getKeyboardEvents()
+
+                    ball_pos, ball_orn = p.getBasePositionAndOrientation(self.ball_id)
+
+                    new_pos = list(ball_pos)
+
+    
+
+                    if p.B3G_LEFT_ARROW in keys and keys[p.B3G_LEFT_ARROW] & p.KEY_IS_DOWN: new_pos[0] -= move_speed
+
+                    if p.B3G_RIGHT_ARROW in keys and keys[p.B3G_RIGHT_ARROW] & p.KEY_IS_DOWN: new_pos[0] += move_speed
+
+                    if p.B3G_UP_ARROW in keys and keys[p.B3G_UP_ARROW] & p.KEY_IS_DOWN: new_pos[1] += move_speed
+
+                    if p.B3G_DOWN_ARROW in keys and keys[p.B3G_DOWN_ARROW] & p.KEY_IS_DOWN: new_pos[1] -= move_speed
+
+                    p.resetBasePositionAndOrientation(self.ball_id, new_pos, ball_orn)
+
+    
+
+                    # --- Contact Detection Logic ---
+
+                    current_contact_status = "None"
+
+                    agent_player_links = self.team1_player_links if self.player_id == 1 else self.team2_player_links
+
+                    opponent_player_links = self.team2_player_links if self.player_id == 1 else self.team1_player_links
+
+    
+
+                    # Check for contact with agent rods
+
+                    for link_idx in agent_player_links:
+
                         if p.getContactPoints(bodyA=self.table_id, bodyB=self.ball_id, linkIndexA=link_idx):
-                            current_contact_status = f"Contact with OPPONENT (Player {3 - self.player_id})"
+
+                            current_contact_status = f"Contact with AGENT (Player {self.player_id})"
+
                             break
-                
-                if current_contact_status != last_contact_status:
-                    print(f"\n[Contact Status Changed] -> {current_contact_status}")
-                    last_contact_status = current_contact_status
 
-                # Read sliders and update goal lines
-                self.goal_line_x_1 = p.readUserDebugParameter(self.goal_line_slider_1)
-                self.goal_line_x_2 = p.readUserDebugParameter(self.goal_line_slider_2)
-                
-                # Draw new debug lines
-                if line1_id is not None: p.removeUserDebugItem(line1_id)
-                if line2_id is not None: p.removeUserDebugItem(line2_id)
-                line1_id = p.addUserDebugLine([self.goal_line_x_1, y_min, z_pos], [self.goal_line_x_1, y_max, z_pos], [1, 0, 0], 2)
-                line2_id = p.addUserDebugLine([self.goal_line_x_2, y_min, z_pos], [self.goal_line_x_2, y_max, z_pos], [0, 0, 1], 2)
+                    
 
-                p.stepSimulation()
-                time.sleep(1./240.)
+                    # If no agent contact, check for opponent contact
 
-        except p.error as e:
-            pass # This can happen if the user closes the window
-        finally:
-            print("\nExiting interactive debug mode.")
-            self.close()
+                    if current_contact_status == "None":
+
+                        for link_idx in opponent_player_links:
+
+                            if p.getContactPoints(bodyA=self.table_id, bodyB=self.ball_id, linkIndexA=link_idx):
+
+                                current_contact_status = f"Contact with OPPONENT (Player {3 - self.player_id})"
+
+                                break
+
+                    
+
+                    if current_contact_status != last_contact_status:
+
+                        print(f"\n[Contact Status Changed] -> {current_contact_status}")
+
+                        last_contact_status = current_contact_status
+
+    
+
+                    # Read sliders and update goal lines
+
+                    self.goal_line_x_1 = p.readUserDebugParameter(self.goal_line_slider_1)
+
+                    self.goal_line_x_2 = p.readUserDebugParameter(self.goal_line_slider_2)
+
+                    
+
+                    # Draw new debug lines
+
+                    if line1_id is not None: p.removeUserDebugItem(line1_id)
+
+                    if line2_id is not None: p.removeUserDebugItem(line2_id)
+
+                    line1_id = p.addUserDebugLine([self.goal_line_x_1, y_min, z_pos], [self.goal_line_x_1, y_max, z_pos], [1, 0, 0], 2)
+
+                    line2_id = p.addUserDebugLine([self.goal_line_x_2, y_min, z_pos], [self.goal_line_x_2, y_max, z_pos], [0, 0, 1], 2)
+
+    
+
+                    p.stepSimulation()
+
+                    time.sleep(1./240.)
+
+    
+
+            except p.error as e:
+
+                pass # This can happen if the user closes the window
+
+            finally:
+
+                print("\nExiting interactive debug mode.")
+
+                self.close()
 
 
 def test_individual_rod_control():
