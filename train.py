@@ -1,21 +1,3 @@
-#!/usr/bin/env python3
-"""
-Stage-by-stage training with checkpoint loading.
-
-Usage:
-  # Stage 1 (fresh start)
-  uv run train_stages.py --stage 1
-  
-  # Stage 2 (load Stage 1)
-  uv run train_stages.py --stage 2 --load saves/foosball_stage_1_completed.zip
-  
-  # Stage 3 (load Stage 2)
-  uv run train_stages.py --stage 3 --load saves/foosball_stage_2_completed.zip
-  
-  # Stage 4 (load Stage 3)
-  uv run train_stages.py --stage 4 --load saves/foosball_stage_3_completed.zip
-"""
-
 import os
 import argparse
 import sys
@@ -23,7 +5,15 @@ from datetime import datetime
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
+
 from foosball_env import FoosballEnv
+from foosball_utils import load_config, get_config_value
+
+# Load default configuration
+DEFAULT_CONFIG_PATH = "configs/default.yaml"
+if not os.path.exists(DEFAULT_CONFIG_PATH):
+    raise FileNotFoundError(f"Default configuration file not found at {DEFAULT_CONFIG_PATH}")
+DEFAULT_CONFIG = load_config(DEFAULT_CONFIG_PATH)
 
 
 class SelfPlayCallback(BaseCallback):
@@ -58,109 +48,43 @@ class RewardLoggerCallback(BaseCallback):
         return True
 
 
-#!/usr/bin/env python3
-"""
-Stage-by-stage training with checkpoint loading.
-
-Usage:
-  # Stage 1 (fresh start)
-  uv run train_stages.py --stage 1
-  
-  # Stage 2 (load Stage 1)
-  uv run train_stages.py --stage 2 --load saves/foosball_stage_1_completed.zip
-  
-  # Stage 3 (load Stage 2)
-  uv run train_stages.py --stage 3 --load saves/foosball_stage_2_completed.zip
-  
-  # Stage 4 (load Stage 3)
-  uv run train_stages.py --stage 4 --load saves/foosball_stage_3_completed.zip
-"""
-
-import os
-import argparse
-import sys
-from datetime import datetime
-from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
-from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
-from foosball_env import FoosballEnv
-
-
-class SelfPlayCallback(BaseCallback):
-    def __init__(self, update_freq: int, verbose=0):
-        super(SelfPlayCallback, self).__init__(verbose)
-        self.update_freq = update_freq
-
-    def _on_step(self) -> bool:
-        if self.n_calls % self.update_freq == 0:
-            self.training_env.env_method("update_opponent_model", self.model.policy.to("cpu").state_dict())
-        return True
-
-
-class RewardLoggerCallback(BaseCallback):
-    """
-    A custom callback to log mean episodic reward to the console.
-    """
-    def __init__(self, check_freq: int, verbose: int = 1):
-        super(RewardLoggerCallback, self).__init__(verbose)
-        self.check_freq = check_freq
-
-    def _on_step(self) -> bool:
-        if self.n_calls % self.check_freq == 0:
-            # The ep_info_buffer is a deque of dicts {'r': reward, 'l': length, 't': timestamp}
-            if hasattr(self.training_env, 'ep_info_buffer'):
-                ep_info_buffer = self.training_env.ep_info_buffer
-                if ep_info_buffer:
-                    # Calculate the mean reward from all episodes in the buffer
-                    mean_reward = sum([info['r'] for info in ep_info_buffer]) / len(ep_info_buffer)
-                    if self.verbose > 0:
-                        print(f"Timestep: {self.num_timesteps}, Mean Episode Reward: {mean_reward:.2f}")
-        return True
-
-
-STAGE_INFO = {
-    1: {
-        "name": "Dribble",
-        "description": "Ball stationary - learn basic hitting",
-        "steps": 1_000_000,
-        "focus": "Basic control, ball contact"
-    },
-    2: {
-        "name": "Pass",
-        "description": "Ball rolling toward you - learn interception",
-        "steps": 1_000_000,
-        "focus": "Interception, positioning"
-    },
-    3: {
-        "name": "Defend",
-        "description": "Ball shot fast at goal - learn defense",
-        "steps": 1_000_000,
-        "focus": "Blocking, defensive positioning"
-    },
-    4: {
-        "name": "Full Game",
-        "description": "Random play - learn complete strategy",
-        "steps": 25_000_000,
-        "steps_per_episode": 50_000,
-        "focus": "Offense, defense, strategy"
-    }
-}
-
-
-def train_stage(stage, load_checkpoint=None, steps=250_000, num_envs=4, 
-                learning_rate=3e-4, render=False, steps_per_episode=2000):
+def train_stage(stage, full_config, load_checkpoint=None, render=False):
     """Train a specific curriculum stage."""
     
-    info = STAGE_INFO[stage]
+    stage_config = full_config['curriculum'][f'stage_{stage}']
     
+    # Extract common training parameters
+    training_config = full_config['training']
+    learning_rate = training_config['learning_rate']
+    num_envs = training_config['num_parallel_envs']
+    checkpoint_freq = training_config['checkpoint_freq']
+    
+    # Extract stage-specific parameters
+    stage_steps = stage_config['duration_steps']
+    max_episode_steps = stage_config.get('max_episode_steps', 2000) # Default if not specified, though it should be in config
+    
+    # PPO hyperparameters (common for all stages unless overridden)
+    ppo_params = {
+        "policy": "MlpPolicy",
+        "learning_rate": float(learning_rate), # Convert to float here
+        "batch_size": training_config['batch_size'],
+        "n_steps": training_config['n_steps'],
+        "n_epochs": training_config['n_epochs'], # Corrected typo
+        "gamma": training_config['gamma'],
+        "gae_lambda": training_config['gae_lambda'],
+        "clip_range": training_config['clip_range'],
+        "ent_coef": training_config['entropy_coefficient'],
+        "verbose": 1,
+    }
+
     print(f"""
 ╔════════════════════════════════════════════════════════════════════╗
-║  Stage {stage}: {info['name']}
-║  {info['description']}
+║  Stage {stage}: {stage_config['name']}
+║  {stage_config['description']}
 ╚════════════════════════════════════════════════════════════════════╝
 
-  Focus: {info['focus']}
-  Steps: {steps:,}
+  Focus: {stage_config.get('focus', 'N/A')}
+  Steps: {stage_steps:,}
   Parallel Envs: {num_envs}
   Learning Rate: {learning_rate}
 """
@@ -176,11 +100,11 @@ def train_stage(stage, load_checkpoint=None, steps=250_000, num_envs=4,
     
     # Callbacks
     checkpoint_callback = CheckpointCallback(
-        save_freq=50_000,
+        save_freq=checkpoint_freq,
         save_path="saves/",
         name_prefix=f"stage_{stage}_ckpt"
     )
-    reward_logger_callback = RewardLoggerCallback(check_freq=1000) # Log every 1000 timesteps
+    reward_logger_callback = RewardLoggerCallback(check_freq=1000)
 
     if stage == 4:
         print("Setting up self-play for Stage 4...")
@@ -188,49 +112,32 @@ def train_stage(stage, load_checkpoint=None, steps=250_000, num_envs=4,
         def make_env(rank):
             def _init():
                 env_render_mode = 'human' if (rank == 0 and render) else 'direct'
-                # Opponent model is passed at the environment level
                 return FoosballEnv(
+                    config=full_config,
                     render_mode=env_render_mode,
                     curriculum_level=stage,
                     opponent_model=None, # Will be set later
-                    steps_per_episode=steps_per_episode
                 )
             return _init
 
-        # Create the vectorized environment
         env = VecMonitor(SubprocVecEnv([make_env(i) for i in range(num_envs)]))
 
-        # Handle model loading or creation
         if load_checkpoint and os.path.exists(load_checkpoint):
             print(f"✅ Loading checkpoint for agent and opponent: {load_checkpoint}")
             model = PPO.load(load_checkpoint, env=env)
             opponent_model = PPO.load(load_checkpoint)
         else:
             print("🆕 No valid checkpoint provided for Stage 4. Creating a new model from scratch.")
-            model_params = {
-                "policy": "MlpPolicy",
-                "learning_rate": learning_rate,
-                "batch_size": 64,
-                "n_steps": 2048,
-                "n_epochs": 10,
-                "gamma": 0.99,
-                "gae_lambda": 0.95,
-                "clip_range": 0.2,
-                "ent_coef": 0.03,
-                "verbose": 1,
-                "tensorboard_log": log_dir
-            }
+            model_params = ppo_params.copy()
+            model_params["tensorboard_log"] = log_dir
             model = PPO(env=env, **model_params)
             
-            # Create a structurally identical opponent model, it doesn't need an env
-            # The policy class is passed directly, so remove it from the params dict
-            opponent_model_params = model_params.copy()
+            opponent_model_params = ppo_params.copy()
             opponent_model_params.pop("policy", None)
-            opponent_model_params.pop("tensorboard_log", None)
             opponent_model = PPO(
                 policy=model.policy.__class__, 
                 env=None, 
-                _init_setup_model=False, # We'll set it up manually
+                _init_setup_model=False,
                 **opponent_model_params
             )
             opponent_model.observation_space = model.observation_space
@@ -238,17 +145,14 @@ def train_stage(stage, load_checkpoint=None, steps=250_000, num_envs=4,
             opponent_model.n_envs = model.n_envs
             opponent_model._setup_model()
 
-        # Set the opponent model in each environment
         env.env_method("update_opponent_model", opponent_model.policy.state_dict(), indices=range(num_envs))
         
-        # Callback for self-play
-        self_play_callback = SelfPlayCallback(update_freq=100_000)
+        self_play_callback = SelfPlayCallback(update_freq=100_000) # update_freq could be made configurable
         
-        # Train
         print(f"\n🚀 Training Stage {stage} with self-play...\n")
         try:
             model.learn(
-                total_timesteps=steps,
+                total_timesteps=stage_steps,
                 callback=[checkpoint_callback, self_play_callback, reward_logger_callback],
                 progress_bar=True
             )
@@ -260,6 +164,7 @@ def train_stage(stage, load_checkpoint=None, steps=250_000, num_envs=4,
             def _init():
                 env_render_mode = 'human' if (rank == 0 and render) else 'direct'
                 return FoosballEnv(
+                    config=full_config,
                     render_mode=env_render_mode,
                     curriculum_level=stage
                 )
@@ -268,7 +173,6 @@ def train_stage(stage, load_checkpoint=None, steps=250_000, num_envs=4,
         print("Creating environments...")
         env = VecMonitor(SubprocVecEnv([make_env(i) for i in range(num_envs)]))
         
-        # Load or create model
         if load_checkpoint and os.path.exists(load_checkpoint):
             print(f"✅ Loading checkpoint: {load_checkpoint}")
             model = PPO.load(load_checkpoint)
@@ -276,33 +180,20 @@ def train_stage(stage, load_checkpoint=None, steps=250_000, num_envs=4,
             print(f"   Model loaded and environment set!")
         else:
             print(f"🆕 Creating new model for Stage {stage}")
-            model = PPO(
-                "MlpPolicy",
-                env,
-                learning_rate=learning_rate,
-                batch_size=64,
-                n_steps=2048,
-                n_epochs=10,
-                gamma=0.99,
-                gae_lambda=0.95,
-                clip_range=0.2,
-                ent_coef=0.03,
-                verbose=1,
-                tensorboard_log=log_dir
-            )
+            model_params = ppo_params.copy()
+            model_params["tensorboard_log"] = log_dir
+            model = PPO(env=env, **model_params)
         
-        # Train
         print(f"\n🚀 Training Stage {stage}...\n")
         try:
             model.learn(
-                total_timesteps=steps,
+                total_timesteps=stage_steps,
                 callback=[checkpoint_callback, reward_logger_callback],
                 progress_bar=True
             )
         except KeyboardInterrupt:
             print("\n⚠️  Training interrupted!")
     
-    # Save stage checkpoint
     stage_checkpoint = f"saves/foosball_stage_{stage}_completed"
     model.save(stage_checkpoint)
     
@@ -317,10 +208,11 @@ def train_stage(stage, load_checkpoint=None, steps=250_000, num_envs=4,
     env.close()
     
     if stage < 4:
-        print(f"Next: uv run train.py --stage {stage+1} --load {stage_checkpoint}.zip")
+        print(f"Next: uv run train.py --stage {stage+1} --load {stage_checkpoint}.zip --config <your_config.yaml>")
     else:
         print("🎉 All stages complete! Model ready for deployment.")
         print(f"   Final model: {stage_checkpoint}.zip")
+
 
 
 def main():
@@ -329,6 +221,12 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=DEFAULT_CONFIG_PATH,
+        help="Path to the training configuration YAML file"
+    )
     parser.add_argument(
         "--stage",
         type=int,
@@ -347,24 +245,6 @@ def main():
         help="Checkpoint to load (e.g., saves/foosball_stage_1_completed.zip)"
     )
     parser.add_argument(
-        "--steps",
-        type=int,
-        default=None,
-        help="Steps to train (default: 250K per stage)"
-    )
-    parser.add_argument(
-        "--num-envs",
-        type=int,
-        default=4,
-        help="Number of parallel environments (default: 4)"
-    )
-    parser.add_argument(
-        "--lr",
-        type=float,
-        default=3e-4,
-        help="Learning rate (default: 3e-4)"
-    )
-    parser.add_argument(
         "--render",
         action="store_true",
         help="Enable GUI rendering"
@@ -372,37 +252,30 @@ def main():
     
     args = parser.parse_args()
 
-    if args.run_all or len(sys.argv) == 1:
+    full_config = load_config(args.config)
+    
+    if args.run_all or (not args.stage and not args.run_all): # If no stage is specified, run all
         # Run all stages sequentially
-        checkpoint = None
+        checkpoint = args.load
         for stage in range(1, 5):
-            steps = args.steps if args.steps else STAGE_INFO[stage]["steps"]
-            steps_per_episode = STAGE_INFO[stage].get("steps_per_episode", 2000)
             train_stage(
                 stage=stage,
+                full_config=full_config,
                 load_checkpoint=checkpoint,
-                steps=steps,
-                num_envs=args.num_envs,
-                learning_rate=args.lr,
                 render=args.render,
-                steps_per_episode=steps_per_episode
             )
             checkpoint = f"saves/foosball_stage_{stage}_completed.zip"
     elif args.stage:
         # Run a single stage
-        steps = args.steps if args.steps else STAGE_INFO[args.stage]["steps"]
-        steps_per_episode = STAGE_INFO[args.stage].get("steps_per_episode", 2000) # Get or default
         train_stage(
             stage=args.stage,
+            full_config=full_config,
             load_checkpoint=args.load,
-            steps=steps,
-            num_envs=args.num_envs,
-            learning_rate=args.lr,
             render=args.render,
-            steps_per_episode=steps_per_episode
         )
     else:
-        parser.print__help()
+        parser.print_help()
+
 
 
 if __name__ == "__main__":

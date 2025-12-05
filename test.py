@@ -9,15 +9,17 @@ import argparse
 import time
 from stable_baselines3 import PPO
 from foosball_env import FoosballEnv
+from foosball_utils import load_config
+from train import DEFAULT_CONFIG_PATH
 
 
-def test_individual_rod_control():
+def test_individual_rod_control(config):
     """Test moving each rod of a team individually."""
     print("\n" + "="*80)
     print("TEST: INDIVIDUAL ROD CONTROL (Team 1 - RED)")
     print("="*80)
     
-    env = FoosballEnv(render_mode='human', curriculum_level=1, player_id=1, steps_per_episode=20000)
+    env = FoosballEnv(config=config, render_mode='human', curriculum_level=1, player_id=1)
     obs, _ = env.reset()
     
     # Action indices for Team 1:
@@ -81,14 +83,14 @@ def test_individual_rod_control():
 class SymmetricMatch:
     """Run a symmetric foosball match between two identical agents"""
     
-    def __init__(self, model_path, render=True):
+    def __init__(self, model_path, config, render=True):
         self.model = PPO.load(model_path)
         self.render = render
         self.env = FoosballEnv(
+            config=config,
             render_mode='human' if render else 'computer',
             curriculum_level=4,
             debug_mode=False,
-            steps_per_episode=50000
         )
     
     def run_match(self, num_episodes=5, verbose=True):
@@ -145,6 +147,12 @@ class SymmetricMatch:
 
 def main():
     parser = argparse.ArgumentParser(description="Test foosball environment")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default=DEFAULT_CONFIG_PATH,
+        help="Path to the training configuration YAML file"
+    )
     parser.add_argument("--model", default="saves/foosball_stage_4_completed.zip", help="Model path")
     parser.add_argument("--episodes", type=int, default=5, help="Number of episodes")
     parser.add_argument("--no-render", action="store_true", help="Disable rendering")
@@ -152,9 +160,11 @@ def main():
     parser.add_argument("--test-rods", action="store_true", help="Test individual rod control")
     
     args = parser.parse_args()
+
+    full_config = load_config(args.config)
     
     if args.test_rods:
-        test_individual_rod_control()
+        test_individual_rod_control(full_config)
         return
 
     np.random.seed(args.seed)
@@ -165,7 +175,7 @@ def main():
     print(f"   Render: {not args.no_render}")
     print()
     
-    match = SymmetricMatch(args.model, render=not args.no_render)
+    match = SymmetricMatch(args.model, config=full_config, render=not args.no_render)
     stats = match.run_match(num_episodes=args.episodes, verbose=True)
     match.close()
     
