@@ -48,16 +48,22 @@ class RewardLoggerCallback(BaseCallback):
         return True
 
 
-def train_stage(stage, full_config, load_checkpoint=None, render=False):
+def train_stage(stage, full_config, load_checkpoint=None):
     """Train a specific curriculum stage."""
     
     stage_config = full_config['curriculum'][f'stage_{stage}']
     
     # Extract common training parameters
     training_config = full_config['training']
-    learning_rate = training_config['learning_rate']
+    learning_rate = float(training_config['learning_rate'])
     num_envs = training_config['num_parallel_envs']
     checkpoint_freq = training_config['checkpoint_freq']
+    num_envs_render = training_config['num_envs_render']
+
+    # Ensure num_envs is at least num_envs_render if rendering is enabled
+    if num_envs_render > 0 and num_envs < num_envs_render:
+        print(f"Warning: num_parallel_envs ({num_envs}) is less than num_envs_render ({num_envs_render}). Setting num_parallel_envs to num_envs_render.")
+        num_envs = num_envs_render
     
     # Extract stage-specific parameters
     stage_steps = stage_config['duration_steps']
@@ -66,7 +72,7 @@ def train_stage(stage, full_config, load_checkpoint=None, render=False):
     # PPO hyperparameters (common for all stages unless overridden)
     ppo_params = {
         "policy": "MlpPolicy",
-        "learning_rate": float(learning_rate), # Convert to float here
+        "learning_rate": learning_rate,
         "batch_size": training_config['batch_size'],
         "n_steps": training_config['n_steps'],
         "n_epochs": training_config['n_epochs'], # Corrected typo
@@ -109,9 +115,9 @@ def train_stage(stage, full_config, load_checkpoint=None, render=False):
     if stage == 4:
         print("Setting up self-play for Stage 4...")
         
-        def make_env(rank):
+        def make_env(rank, _num_envs_render_arg=num_envs_render): # Explicitly pass num_envs_render
             def _init():
-                env_render_mode = 'human' if (rank == 0 and render) else 'direct'
+                env_render_mode = 'human' if (_num_envs_render_arg > 0 and rank < _num_envs_render_arg) else 'direct'
                 return FoosballEnv(
                     config=full_config,
                     render_mode=env_render_mode,
@@ -160,9 +166,9 @@ def train_stage(stage, full_config, load_checkpoint=None, render=False):
             print("\n⚠️  Training interrupted!")
 
     else: # Stages 1, 2, 3
-        def make_env(rank):
+        def make_env(rank, _num_envs_render_arg=num_envs_render): # Explicitly pass num_envs_render
             def _init():
-                env_render_mode = 'human' if (rank == 0 and render) else 'direct'
+                env_render_mode = 'human' if (_num_envs_render_arg > 0 and rank < _num_envs_render_arg) else 'direct'
                 return FoosballEnv(
                     config=full_config,
                     render_mode=env_render_mode,
@@ -244,11 +250,6 @@ def main():
         default=None,
         help="Checkpoint to load (e.g., saves/foosball_stage_1_completed.zip)"
     )
-    parser.add_argument(
-        "--render",
-        action="store_true",
-        help="Enable GUI rendering"
-    )
     
     args = parser.parse_args()
 
@@ -262,7 +263,6 @@ def main():
                 stage=stage,
                 full_config=full_config,
                 load_checkpoint=checkpoint,
-                render=args.render,
             )
             checkpoint = f"saves/foosball_stage_{stage}_completed.zip"
     elif args.stage:
@@ -271,7 +271,6 @@ def main():
             stage=args.stage,
             full_config=full_config,
             load_checkpoint=args.load,
-            render=args.render,
         )
     else:
         parser.print_help()

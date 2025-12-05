@@ -19,8 +19,8 @@ environment:
   max_force: 1.0
   
   # Goal lines
-  goal_line_x_1: -0.69  # Team 1 (Red) goal
-  goal_line_x_2: 0.69   # Team 2 (Blue) goal
+  goal_line_x_1: -0.725  # Team 1 (Red) goal
+  goal_line_x_2: 0.725   # Team 2 (Blue) goal
   
   # Ball stuck detection
   max_stuck_steps: 500
