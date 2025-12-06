@@ -436,9 +436,11 @@ class FoosballEnv(gym.Env):
         if (self.player_id == 1 and ball_pos[0] > self.goal_line_x_2) or \
            (self.player_id == 2 and ball_pos[0] < self.goal_line_x_1):
             reward += goal_reward  # Goal for agent
+            print(f"Goal scored by agent (Player {self.player_id})!")
         if (self.player_id == 1 and ball_pos[0] < self.goal_line_x_1) or \
            (self.player_id == 2 and ball_pos[0] > self.goal_line_x_2):
             reward -= concede_penalty  # Own goal
+            print(f"Own goal by agent (Player {self.player_id})!")
 
         # --- Dense Rewards and Penalties ---
 
@@ -518,6 +520,10 @@ class FoosballEnv(gym.Env):
         current_rev_pos = np.array([state[0] for state in p.getJointStates(self.table_id, agent_spins, physicsClientId=self.client)])
         reward -= rod_angle_penalty_scale * np.sum(np.abs(current_rev_pos))
 
+        # 7. Midfield reward
+        midfield_reward_weight = self.reward_config.get('midfield_reward_weight', 0.0)
+        reward += midfield_reward_weight * (1 - np.tanh(abs(ball_pos[1])))
+
         return reward
 
     def _check_termination(self, obs):
@@ -539,155 +545,82 @@ class FoosballEnv(gym.Env):
         p.disconnect(self.client)
 
     def run_goal_debug_loop(self):
-
         """
-
         An interactive debug loop for visualizing goal lines and manually controlling the ball,
-
         now with real-time contact status reporting.
-
         """
 
         if not self.goal_debug_mode:
-
             print("Goal debug mode is not enabled. Please instantiate Env with goal_debug_mode=True.")
-
             return
 
-    
-
         print("\n" + "="*80 + "\nINTERACTIVE DEBUG MODE\n" + "="*80)
-
         print(" - Use ARROW KEYS to move the ball.")
-
         print(" - Use the sliders to adjust the goal lines.")
-
         print(" - Contact status with agent/opponent rods will be printed on change.")
-
         print(" - Press ESC or close the window to exit.")
 
-        
-
         table_aabb = p.getAABB(self.table_id, physicsClientId=self.client)
-
         y_min, y_max = table_aabb[0][1], table_aabb[1][1]
-
         z_pos = 0.55  # Approximate height of the playing surface
 
-    
-
         line1_id, line2_id = None, None
-
         move_speed = 0.01
-
         last_contact_status = "None"
 
-    
-
         try:
-
             while True:
-
                 # Keyboard events for ball control
-
                 keys = p.getKeyboardEvents(physicsClientId=self.client)
-
                 ball_pos, ball_orn = p.getBasePositionAndOrientation(self.ball_id, physicsClientId=self.client)
-
                 new_pos = list(ball_pos)
 
-    
-
                 if p.B3G_LEFT_ARROW in keys and keys[p.B3G_LEFT_ARROW] & p.KEY_IS_DOWN: new_pos[0] -= move_speed
-
                 if p.B3G_RIGHT_ARROW in keys and keys[p.B3G_RIGHT_ARROW] & p.KEY_IS_DOWN: new_pos[0] += move_speed
-
                 if p.B3G_UP_ARROW in keys and keys[p.B3G_UP_ARROW] & p.KEY_IS_DOWN: new_pos[1] += move_speed
-
                 if p.B3G_DOWN_ARROW in keys and keys[p.B3G_DOWN_ARROW] & p.KEY_IS_DOWN: new_pos[1] -= move_speed
-
                 p.resetBasePositionAndOrientation(self.ball_id, new_pos, ball_orn, physicsClientId=self.client)
 
-    
-
                 # --- Contact Detection Logic ---
-
                 current_contact_status = "None"
-
                 agent_player_links = self.team1_player_links if self.player_id == 1 else self.team2_player_links
-
                 opponent_player_links = self.team2_player_links if self.player_id == 1 else self.team1_player_links
 
-    
 
                 # Check for contact with agent rods
-
                 for link_idx in agent_player_links:
-
                     if p.getContactPoints(bodyA=self.table_id, bodyB=self.ball_id, linkIndexA=link_idx, physicsClientId=self.client):
-
                         current_contact_status = f"Contact with AGENT (Player {self.player_id})"
-
                         break
 
-                
-
                 # If no agent contact, check for opponent contact
-
                 if current_contact_status == "None":
-
                     for link_idx in opponent_player_links:
-
                         if p.getContactPoints(bodyA=self.table_id, bodyB=self.ball_id, linkIndexA=link_idx, physicsClientId=self.client):
-
                             current_contact_status = f"Contact with OPPONENT (Player {3 - self.player_id})"
-
                             break
 
-                
-
                 if current_contact_status != last_contact_status:
-
                     print(f"\n[Contact Status Changed] -> {current_contact_status}")
-
                     last_contact_status = current_contact_status
 
-    
-
                 # Read sliders and update goal lines
-
                 self.goal_line_x_1 = p.readUserDebugParameter(self.goal_line_slider_1, physicsClientId=self.client)
-
                 self.goal_line_x_2 = p.readUserDebugParameter(self.goal_line_slider_2, physicsClientId=self.client)
 
-                
-
                 # Draw new debug lines
-
                 if line1_id is not None: p.removeUserDebugItem(line1_id, physicsClientId=self.client)
-
                 if line2_id is not None: p.removeUserDebugItem(line2_id, physicsClientId=self.client)
-
                 line1_id = p.addUserDebugLine([self.goal_line_x_1, y_min, z_pos], [self.goal_line_x_1, y_max, z_pos], [1, 0, 0], 2, physicsClientId=self.client)
-
                 line2_id = p.addUserDebugLine([self.goal_line_x_2, y_min, z_pos], [self.goal_line_x_2, y_max, z_pos], [0, 0, 1], 2, physicsClientId=self.client)
 
-    
-
                 p.stepSimulation(physicsClientId=self.client)
-
                 time.sleep(1./240.)
 
-    
-
         except p.error as e:
-
             pass # This can happen if the user closes the window
-
         finally:
-
             print("\nExiting interactive debug mode.")
-
             self.close()
 
 
@@ -832,7 +765,6 @@ def test_stage_3_spawning():
     print("\n✅ Stage 3 spawning test complete.")
 
 
-
 def test_mirrored_obs_and_contact_reward():
     """
     Test the _get_mirrored_obs function and the contact reward logic.
@@ -920,7 +852,7 @@ def test_ball_reachability():
     1. A fast, non-rendered phase to determine reachability for all points.
     2. A visualization phase to show the results.
     """
-    print("\\n" + "="*80 + "\\nTEST: BALL REACHABILITY (Fast Mode)\\n" + "="*80)
+    print("\n" + "="*80 + "\nTEST: BALL REACHABILITY (Fast Mode)\n" + "="*80)
 
     # Phase 1: Fast checking in DIRECT mode
     env_direct = create_foosball_env_with_config(render_mode='direct')
@@ -991,7 +923,7 @@ def test_ball_reachability():
     env_direct.close()
 
     # Phase 2: Visualization in GUI mode
-    print("\\n" + "="*80 + "\\nVISUALIZING REACHABILITY RESULTS\\n" + "="*80)
+    print("\n" + "="*80 + "\nVISUALIZING REACHABILITY RESULTS\n" + "="*80)
     print(f"Reachable points: {len(reachable_points)}")
     print(f"Unreachable points: {len(unreachable_points)}")
     
@@ -1005,7 +937,7 @@ def test_ball_reachability():
         visual_shape = p.createVisualShape(p.GEOM_SPHERE, radius=0.01, rgbaColor=[1, 0, 0, 0.8], physicsClientId=env_gui.client)
         p.createMultiBody(baseVisualShapeIndex=visual_shape, basePosition=point, physicsClientId=env_gui.client)
 
-    print("\\n✅ Ball reachability test complete. Check the GUI for results.")
+    print("\n✅ Ball reachability test complete. Check the GUI for results.")
     
     # Keep the simulation open for a while to observe the result
     time.sleep(20)
@@ -1020,7 +952,7 @@ def test_forward_hit_reachability():
     1. A fast, non-rendered phase to determine forward hit reachability for all points.
     2. A visualization phase to show the results.
     """
-    print("\\n" + "="*80 + "\\nTEST: FORWARD HIT REACHABILITY (Fast Mode)\\n" + "="*80)
+    print("\n" + "="*80 + "\nTEST: FORWARD HIT REACHABILITY (Fast Mode)\n" + "="*80)
 
     # Phase 1: Fast checking in DIRECT mode
     env_direct = create_foosball_env_with_config(render_mode='human')
@@ -1106,11 +1038,11 @@ def test_forward_hit_reachability():
                 visual_shape = p.createVisualShape(p.GEOM_SPHERE, radius=0.02, rgbaColor=[1, 0, 0, 0.8], physicsClientId=env_direct.client)
                 p.createMultiBody(baseVisualShapeIndex=visual_shape, basePosition=ball_pos, physicsClientId=env_direct.client)
 
-    print("\\n" + "="*80 + "\\nVISUALIZING FORWARD HIT REACHABILITY RESULTS\\n" + "="*80)
+    print("\n" + "="*80 + "\nVISUALIZING FORWARD HIT REACHABILITY RESULTS\n" + "="*80)
     print(f"Forward hit points: {len(forward_hit_points)}")
     print(f"No forward hit points: {len(no_forward_hit_points)}")
     
-    print("\\n✅ Forward hit reachability test complete. Check the GUI for results.")
+    print("\n✅ Forward hit reachability test complete. Check the GUI for results.")
     
     # Keep the simulation open for a while to observe the result
     time.sleep(20)
@@ -1120,7 +1052,7 @@ def test_forward_hit_reachability():
 
 if __name__ == '__main__':
     import argparse
-    from utils import load_config, get_config_value # Import from utils
+    from foosball_utils import load_config, get_config_value # Import from utils
     from train import DEFAULT_CONFIG_PATH # Import DEFAULT_CONFIG_PATH
 
     # Load default configuration for testing
