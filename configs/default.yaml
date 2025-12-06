@@ -27,13 +27,13 @@ environment:
 
 reward:
   # Dense reward scaling (reduced to balance sparse rewards)
-  ball_velocity_scale: 0.00001       # Reward for moving ball toward opponent goal
-  goal_distance_penalty: 0.0005     # Small penalty for distance from goal
-  player_ball_distance_scale: 0.00001  # Reward for being close to ball
-  ball_movement_scale: 0.0001        # Reward for moving closer to ball
+  ball_velocity_scale: 0.000001       # Reward for moving ball toward opponent goal
+  goal_distance_penalty: 0.00005     # Small penalty for distance from goal
+  player_ball_distance_scale: 0.000001  # Reward for being close to ball
+  ball_movement_scale: 0.00001        # Reward for moving closer to ball
   contact_reward: 1.0               # Reward for contacting ball
   action_smoothness_penalty: 0.0    # Penalty for large action changes (disabled)
-  rod_angle_penalty_scale: 0.0001    # Penalty for large rod angles (new)
+  rod_angle_penalty_scale: 0.000001    # Penalty for large rod angles (new)
   
   # Sparse reward scaling (scaled down from original)
   goal_reward: 30.0             # Reward for scoring goal
@@ -45,9 +45,9 @@ reward:
   
   # New penalties
   stagnation_slide_steps: 100        # Steps before slide stagnation penalty applies
-  stagnation_slide_penalty: 0.001    # Penalty for slide stagnation
+  stagnation_slide_penalty: 0.0001    # Penalty for slide stagnation
   stagnation_spin_steps: 100         # Steps before spin stagnation penalty applies
-  stagnation_spin_penalty: 0.001     # Penalty for spin stagnation
+  stagnation_spin_penalty: 0.0001     # Penalty for spin stagnation
   stuck_penalty_threshold: 300       # Steps before ball stuck penalty applies
   stuck_penalty_per_step: 0.005       # Penalty per step when ball is stuck
   inactivity_threshold: 0.001        # Ball velocity below which inactivity penalty applies
@@ -57,7 +57,7 @@ curriculum:
   stage_1:
     name: "Dribble"
     description: "Ball stationary - learn basic hitting"
-    duration_steps: 30_000_000
+    duration_steps: 30_100_000
     max_episode_steps: 300
     ball_spawn_x_range: [[-0.625, -0.55], [-0.45, -0.375], [-0.10, -0.02], [0.275, 0.35]]  # Changed to list of intervals
     ball_spawn_y_range: [-0.3, 0.3]
@@ -66,7 +66,7 @@ curriculum:
   stage_2:
     name: "Pass"
     description: "Ball rolling toward you - learn interception"
-    duration_steps: 30_000_000
+    duration_steps: 30_200_000
     max_episode_steps: 1000
     ball_spawn_x: [[-0.6, -0.5], [-0.4, -0.3], [-0.05, 0.075], [0.275, 0.4]]
     ball_spawn_y_range: [-0.3, 0.3]
@@ -76,7 +76,7 @@ curriculum:
   stage_3:
     name: "Defend"
     description: "Ball shot fast at goal - learn defense"
-    duration_steps: 30_000_000
+    duration_steps: 30_300_000
     max_episode_steps: 500
     ball_spawn_x_range: [[-0.5, -0.475], [-0.40, -0.275]] # Changed to list of intervals
     ball_spawn_y_range: [-0.25, 0.25]
@@ -93,9 +93,9 @@ curriculum:
 
 training:
   # PPO hyperparameters
-  learning_rate: 3e-4
-  batch_size: 64
-  n_steps: 2048
+  learning_rate: 1e-3
+  batch_size: 1024
+  n_steps: 4096
   n_epochs: 10
   gamma: 0.99
   gae_lambda: 0.95
