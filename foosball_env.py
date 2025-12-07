@@ -436,11 +436,9 @@ class FoosballEnv(gym.Env):
         if (self.player_id == 1 and ball_pos[0] > self.goal_line_x_2) or \
            (self.player_id == 2 and ball_pos[0] < self.goal_line_x_1):
             reward += goal_reward  # Goal for agent
-            print(f"Goal scored by agent (Player {self.player_id})!")
         if (self.player_id == 1 and ball_pos[0] < self.goal_line_x_1) or \
            (self.player_id == 2 and ball_pos[0] > self.goal_line_x_2):
             reward -= concede_penalty  # Own goal
-            print(f"Own goal by agent (Player {self.player_id})!")
 
         # --- Dense Rewards and Penalties ---
 

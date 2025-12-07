@@ -7,6 +7,7 @@ Loads a trained policy and has both teams play against each other.
 import numpy as np
 import argparse
 import time
+import pybullet as p
 from stable_baselines3 import PPO
 from foosball_env import FoosballEnv
 from foosball_utils import load_config
@@ -80,24 +81,25 @@ def test_individual_rod_control(config):
     env.close()
 
 
-class SymmetricMatch:
-    """Run a symmetric foosball match between two identical agents"""
+class StageMatch:
+    """Run a match for a specific curriculum stage."""
     
-    def __init__(self, model_path, config, render=True):
+    def __init__(self, model_path, config, stage=4, render=True):
         self.model = PPO.load(model_path)
         self.render = render
+        self.stage = stage
         self.env = FoosballEnv(
             config=config,
-            render_mode='human' if render else 'computer',
-            curriculum_level=4,
+            render_mode='human' if render else 'direct',
+            curriculum_level=self.stage,
             debug_mode=False,
         )
     
     def run_match(self, num_episodes=5, verbose=True):
         """Run match with statistics"""
         stats = {
-            'team1_goals': [],
-            'team2_goals': [],
+            'goals': [],
+            'own_goals': [],
             'episode_lengths': [],
             'episode_rewards': []
         }
@@ -107,37 +109,50 @@ class SymmetricMatch:
             done = False
             episode_reward = 0
             episode_length = 0
+            goals = 0
+            own_goals = 0
 
             while not done:
-                # Team 1 action
-                action1, _ = self.model.predict(obs, deterministic=True)
+                # Agent action
+                action, _ = self.model.predict(obs, deterministic=True)
                 
-                # Mirror observation for Team 2
-                mirrored_obs = self.env._get_mirrored_obs()
+                opponent_action = None
+                if self.stage == 4:
+                    # Mirror observation for Team 2
+                    mirrored_obs = self.env._get_mirrored_obs()
+                    # Team 2 action (mirror of team 1)
+                    opponent_action, _ = self.model.predict(mirrored_obs, deterministic=True)
                 
-                # Team 2 action (mirror of team 1)
-                action2, _ = self.model.predict(mirrored_obs, deterministic=True)
-                
-                obs, reward, terminated, truncated, _ = self.env.step(action1, opponent_action=action2)
+                obs, reward, terminated, truncated, info = self.env.step(action, opponent_action=opponent_action)
 
                 episode_reward += reward
                 episode_length += 1
 
-                if episode_length % 1000 == 0:
-                    if verbose:
-                        print(f"  Step {episode_length}: Current Reward={episode_reward:.2f}")
+                if episode_length % 1000 == 0 and verbose:
+                    print(f"  Step {episode_length}: Current Reward={episode_reward:.2f}")
 
                 done = terminated or truncated
-            
-            # This part is tricky because the env is from perspective of player 1
-            # I will assume goals_this_level is for player 1
-            team1_goals = self.env.goals_this_level
-            stats['team1_goals'].append(team1_goals)
+
+            if done:
+                ball_pos, _ = p.getBasePositionAndOrientation(self.env.ball_id, physicsClientId=self.env.client)
+                if self.env.player_id == 1:
+                    if ball_pos[0] > self.env.goal_line_x_2:
+                        goals += 1
+                    elif ball_pos[0] < self.env.goal_line_x_1:
+                        own_goals += 1
+                else: # player_id == 2
+                    if ball_pos[0] < self.env.goal_line_x_1:
+                        goals += 1
+                    elif ball_pos[0] > self.env.goal_line_x_2:
+                        own_goals += 1
+
+            stats['goals'].append(goals)
+            stats['own_goals'].append(own_goals)
             stats['episode_lengths'].append(episode_length)
             stats['episode_rewards'].append(episode_reward)
             
             if verbose:
-                print(f"Episode {episode + 1}: Reward={episode_reward:.2f}, Length={episode_length}, Goals={team1_goals}")
+                print(f"Episode {episode + 1}: Reward={episode_reward:.2f}, Length={episode_length}, Goals={goals}, Own Goals={own_goals}")
         
         return stats
     
@@ -158,6 +173,7 @@ def main():
     parser.add_argument("--no-render", action="store_true", help="Disable rendering")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--test-rods", action="store_true", help="Test individual rod control")
+    parser.add_argument("--stage", type=int, choices=[1, 2, 3, 4], help="Curriculum stage to test (1-4)")
     
     args = parser.parse_args()
 
@@ -169,21 +185,25 @@ def main():
 
     np.random.seed(args.seed)
     
-    print(f"🎮 Foosball Symmetric Agent Match")
+    stage_to_test = args.stage if args.stage else 4
+
+    print(f"🎮 Foosball Agent Match - Stage {stage_to_test}")
     print(f"   Model: {args.model}")
     print(f"   Episodes: {args.episodes}")
     print(f"   Render: {not args.no_render}")
     print()
     
-    match = SymmetricMatch(args.model, config=full_config, render=not args.no_render)
+    match = StageMatch(args.model, config=full_config, stage=stage_to_test, render=not args.no_render)
     stats = match.run_match(num_episodes=args.episodes, verbose=True)
     match.close()
     
-    print(f"\n📊 Match Statistics:")
-    print(f"   Avg Goals: {np.mean(stats['team1_goals']):.2f} ± {np.std(stats['team1_goals']):.2f}")
+    print(f"\n📊 Match Statistics (Stage {stage_to_test}):")
+    print(f"   Avg Goals: {np.mean(stats['goals']):.2f} ± {np.std(stats['goals']):.2f}")
+    print(f"   Avg Own Goals: {np.mean(stats['own_goals']):.2f} ± {np.std(stats['own_goals']):.2f}")
     print(f"   Avg Episode Length: {np.mean(stats['episode_lengths']):.1f}")
     print(f"   Avg Reward: {np.mean(stats['episode_rewards']):.2f} ± {np.std(stats['episode_rewards']):.2f}")
-    print(f"   Total Goals: {sum(stats['team1_goals'])}")
+    print(f"   Total Goals: {sum(stats['goals'])}")
+    print(f"   Total Own Goals: {sum(stats['own_goals'])}")
 
 
 if __name__ == "__main__":

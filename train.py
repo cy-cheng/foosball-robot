@@ -59,6 +59,7 @@ def train_stage(stage, full_config, load_checkpoint=None):
     num_envs = training_config['num_parallel_envs']
     checkpoint_freq = training_config['checkpoint_freq']
     num_envs_render = training_config['num_envs_render']
+    save_path = training_config.get('save_path')
 
     # Ensure num_envs is at least num_envs_render if rendering is enabled
     if num_envs_render > 0 and num_envs < num_envs_render:
@@ -200,7 +201,10 @@ def train_stage(stage, full_config, load_checkpoint=None):
         except KeyboardInterrupt:
             print("\n⚠️  Training interrupted!")
     
-    stage_checkpoint = f"saves/foosball_stage_{stage}_completed"
+    if save_path:
+        stage_checkpoint = f"{save_path}-{stage}"
+    else:
+        stage_checkpoint = f"saves/foosball_stage_{stage}_completed"
     model.save(stage_checkpoint)
     
     print(f"""
@@ -254,6 +258,7 @@ def main():
     args = parser.parse_args()
 
     full_config = load_config(args.config)
+    save_path = full_config['training'].get('save_path')
     
     if args.run_all or (not args.stage and not args.run_all): # If no stage is specified, run all
         # Run all stages sequentially
@@ -264,7 +269,10 @@ def main():
                 full_config=full_config,
                 load_checkpoint=checkpoint,
             )
-            checkpoint = f"saves/foosball_stage_{stage}_completed.zip"
+            if save_path:
+                checkpoint = f"{save_path}-{stage}.zip"
+            else:
+                checkpoint = f"saves/foosball_stage_{stage}_completed.zip"
     elif args.stage:
         # Run a single stage
         train_stage(
