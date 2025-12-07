@@ -15,9 +15,9 @@ environment:
   rod_restitution: 0.7
   
   # Motor controls
-  max_velocity: 1.5
+  max_velocity: 0.75
   max_force: 1.0
-  max_torque: 6.0
+  max_torque: 0.8
   
   # Goal lines
   goal_line_x_1: -0.725  # Team 1 (Red) goal
@@ -28,17 +28,17 @@ environment:
 
 reward:
   # Dense reward scaling (reduced to balance sparse rewards)
-  ball_velocity_scale: 0.01       # Reward for moving ball toward opponent goal
-  goal_distance_penalty: 0.008     # Small penalty for distance from goal
+  ball_velocity_scale: 0.08       # Reward for moving ball toward opponent goal
+  goal_distance_penalty: 0.005     # Small penalty for distance from goal
   player_ball_distance_scale: 0.0001  # Reward for being close to ball
   ball_movement_scale: 0.001        # Reward for moving closer to ball
-  contact_reward: 5.0               # Reward for contacting ball
+  contact_reward: 0.2               # Reward for contacting ball
   action_smoothness_penalty: 0.0    # Penalty for large action changes (disabled)
   rod_angle_penalty_scale: 0.001    # Penalty for large rod angles (new)
-  midfield_reward_weight: 0.002      # Reward for keeping the ball in the middle of the field
+  midfield_reward_weight: 0.05      # Reward for keeping the ball in the middle of the field
   
-  goal_reward: 250.0             # Reward for scoring goal
-  concede_penalty: 400.0          # Penalty for opponent scoring
+  goal_reward: 125.0             # Reward for scoring goal
+  concede_penalty: 100.0          # Penalty for opponent scoring
   
   # New penalties
   stagnation_slide_steps: 100        # Steps before slide stagnation penalty applies
