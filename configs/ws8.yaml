@@ -17,7 +17,7 @@ environment:
   # Motor controls
   max_velocity: 1.5
   max_force: 1.0
-  max_torque: 2.0
+  max_torque: 6.0
   
   # Goal lines
   goal_line_x_1: -0.725  # Team 1 (Red) goal
