@@ -4,7 +4,7 @@ import sys
 from datetime import datetime
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
-from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor
+from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor, VecNormalize
 
 from foosball_env import FoosballEnv
 from foosball_utils import load_config, get_config_value
@@ -113,22 +113,42 @@ def train_stage(stage, full_config, load_checkpoint=None):
     )
     reward_logger_callback = RewardLoggerCallback(check_freq=1000)
 
+    # --- Environment Setup ---
+    def make_env(rank, _num_envs_render_arg=num_envs_render):
+        def _init():
+            env_render_mode = 'human' if (_num_envs_render_arg > 0 and rank < _num_envs_render_arg) else 'direct'
+            opponent_model = None  # Default for all stages
+            if stage == 4 and load_checkpoint:
+                # In self-play, opponent model is loaded dynamically
+                pass
+            
+            return FoosballEnv(
+                config=full_config,
+                render_mode=env_render_mode,
+                curriculum_level=stage,
+                opponent_model=opponent_model,
+            )
+        return _init
+
+    # Create the vectorized environment
+    vec_env = SubprocVecEnv([make_env(i) for i in range(num_envs)])
+    
+    # Load normalization stats if a checkpoint is provided
+    vec_normalize_path = None
+    if load_checkpoint:
+        vec_normalize_path = load_checkpoint.replace(".zip", "_vecnormalize.pkl")
+
+    if vec_normalize_path and os.path.exists(vec_normalize_path):
+        print(f"✅ Loading VecNormalize stats from: {vec_normalize_path}")
+        env = VecNormalize.load(vec_normalize_path, vec_env)
+    else:
+        print("🆕 Creating new VecNormalize wrapper.")
+        env = VecNormalize(vec_env, gamma=training_config['gamma'])
+
+    # --- Model Setup ---
     if stage == 4:
         print("Setting up self-play for Stage 4...")
         
-        def make_env(rank, _num_envs_render_arg=num_envs_render): # Explicitly pass num_envs_render
-            def _init():
-                env_render_mode = 'human' if (_num_envs_render_arg > 0 and rank < _num_envs_render_arg) else 'direct'
-                return FoosballEnv(
-                    config=full_config,
-                    render_mode=env_render_mode,
-                    curriculum_level=stage,
-                    opponent_model=None, # Will be set later
-                )
-            return _init
-
-        env = VecMonitor(SubprocVecEnv([make_env(i) for i in range(num_envs)]))
-
         if load_checkpoint and os.path.exists(load_checkpoint):
             print(f"✅ Loading checkpoint for agent and opponent: {load_checkpoint}")
             model = PPO.load(load_checkpoint, env=env)
@@ -139,6 +159,7 @@ def train_stage(stage, full_config, load_checkpoint=None):
             model_params["tensorboard_log"] = log_dir
             model = PPO(env=env, **model_params)
             
+            # Create a shell for the opponent model
             opponent_model_params = ppo_params.copy()
             opponent_model_params.pop("policy", None)
             opponent_model = PPO(
@@ -152,38 +173,17 @@ def train_stage(stage, full_config, load_checkpoint=None):
             opponent_model.n_envs = model.n_envs
             opponent_model._setup_model()
 
+        # Update opponent in the environment
         env.env_method("update_opponent_model", opponent_model.policy.state_dict(), indices=range(num_envs))
         
-        self_play_callback = SelfPlayCallback(update_freq=100_000) # update_freq could be made configurable
-        
-        print(f"\n🚀 Training Stage {stage} with self-play...\n")
-        try:
-            model.learn(
-                total_timesteps=stage_steps,
-                callback=[checkpoint_callback, self_play_callback, reward_logger_callback],
-                progress_bar=True
-            )
-        except KeyboardInterrupt:
-            print("\n⚠️  Training interrupted!")
+        # Setup self-play callback
+        self_play_callback = SelfPlayCallback(update_freq=100_000)
+        callbacks = [checkpoint_callback, self_play_callback, reward_logger_callback]
 
     else: # Stages 1, 2, 3
-        def make_env(rank, _num_envs_render_arg=num_envs_render): # Explicitly pass num_envs_render
-            def _init():
-                env_render_mode = 'human' if (_num_envs_render_arg > 0 and rank < _num_envs_render_arg) else 'direct'
-                return FoosballEnv(
-                    config=full_config,
-                    render_mode=env_render_mode,
-                    curriculum_level=stage
-                )
-            return _init
-        
-        print("Creating environments...")
-        env = VecMonitor(SubprocVecEnv([make_env(i) for i in range(num_envs)]))
-        
         if load_checkpoint and os.path.exists(load_checkpoint):
             print(f"✅ Loading checkpoint: {load_checkpoint}")
-            model = PPO.load(load_checkpoint)
-            model.set_env(env)
+            model = PPO.load(load_checkpoint, env=env)
             print(f"   Model loaded and environment set!")
         else:
             print(f"🆕 Creating new model for Stage {stage}")
@@ -191,26 +191,33 @@ def train_stage(stage, full_config, load_checkpoint=None):
             model_params["tensorboard_log"] = log_dir
             model = PPO(env=env, **model_params)
         
-        print(f"\n🚀 Training Stage {stage}...\n")
-        try:
-            model.learn(
-                total_timesteps=stage_steps,
-                callback=[checkpoint_callback, reward_logger_callback],
-                progress_bar=True
-            )
-        except KeyboardInterrupt:
-            print("\n⚠️  Training interrupted!")
-    
+        callbacks = [checkpoint_callback, reward_logger_callback]
+
+    # --- Training ---
+    print(f"\n🚀 Training Stage {stage}...\n")
+    try:
+        model.learn(
+            total_timesteps=stage_steps,
+            callback=callbacks,
+            progress_bar=True
+        )
+    except KeyboardInterrupt:
+        print("\n⚠️  Training interrupted!")
+
+    # --- Saving ---
     if save_path:
-        stage_checkpoint = f"{save_path}-{stage}"
+        stage_checkpoint_path = f"{save_path}-{stage}"
     else:
-        stage_checkpoint = f"saves/foosball_stage_{stage}_completed"
-    model.save(stage_checkpoint)
+        stage_checkpoint_path = f"saves/foosball_stage_{stage}_completed"
+    
+    model.save(stage_checkpoint_path)
+    env.save(stage_checkpoint_path.replace(".zip", "") + "_vecnormalize.pkl")
     
     print(f"""
 
 ✅ Stage {stage} Complete!
-   Saved: {stage_checkpoint}.zip
+   Saved Model: {stage_checkpoint_path}.zip
+   Saved VecNormalize Stats: {stage_checkpoint_path}_vecnormalize.pkl
    Logs: {log_dir}/
 """
 )
@@ -218,10 +225,10 @@ def train_stage(stage, full_config, load_checkpoint=None):
     env.close()
     
     if stage < 4:
-        print(f"Next: uv run train.py --stage {stage+1} --load {stage_checkpoint}.zip --config <your_config.yaml>")
+        print(f"Next: uv run train.py --stage {stage+1} --load {stage_checkpoint_path}.zip --config <your_config.yaml>")
     else:
         print("🎉 All stages complete! Model ready for deployment.")
-        print(f"   Final model: {stage_checkpoint}.zip")
+        print(f"   Final model: {stage_checkpoint_path}.zip")
 
 
 
