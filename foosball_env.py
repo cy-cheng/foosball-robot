@@ -53,8 +53,6 @@ class FoosballEnv(gym.Env):
         # For new stagnation penalty
         self.last_slide_positions = np.zeros(4)
         self.slide_stagnation_counter = 0
-        self.last_spin_velocities = np.zeros(4)
-        self.spin_stagnation_counter = 0
         
         p.setAdditionalSearchPath(pybullet_data.getDataPath())
         p.setGravity(0, 0, self.physics_config['gravity'], physicsClientId=self.client) # From config, set gravX, gravY to 0
@@ -111,6 +109,7 @@ class FoosballEnv(gym.Env):
         
         self.max_vel = self.env_config['max_velocity'] # From config
         self.max_force = self.env_config['max_force'] # From config
+        self.max_torque = self.env_config.get('max_torque', 1.0) # From config, with default
         
         self.goal_line_x_1 = self.env_config['goal_line_x_1'] # From config
         self.goal_line_x_2 = self.env_config['goal_line_x_2'] # From config
@@ -195,6 +194,12 @@ class FoosballEnv(gym.Env):
         self.team2_slide_joints = [team2_slide_joints_map[k] for k in sorted(team2_slide_joints_map)]
         self.team2_rev_joints = [team2_rev_joints_map[k] for k in sorted(team2_rev_joints_map)]
 
+        # Disable the default motors for revolute joints to allow for torque control
+        all_rev_joints = self.team1_rev_joints + self.team2_rev_joints
+        for joint_id in all_rev_joints:
+            p.setJointMotorControl2(self.table_id, joint_id, p.VELOCITY_CONTROL, force=0, physicsClientId=self.client)
+
+
     def _setup_camera(self):
         p.resetDebugVisualizerCamera(cameraDistance=1.5, cameraYaw=0, cameraPitch=-45, cameraTargetPosition=[0, 0, 0.5])
 
@@ -276,8 +281,6 @@ class FoosballEnv(gym.Env):
         # For new stagnation penalty
         self.last_slide_positions = np.zeros(4)
         self.slide_stagnation_counter = 0
-        self.last_spin_velocities = np.zeros(4)
-        self.spin_stagnation_counter = 0
         
         # Set max_episode_steps from curriculum config for the current stage
         curriculum_stage_config = self.curriculum_config_all_stages[f'stage_{self.curriculum_level}']
@@ -309,9 +312,15 @@ class FoosballEnv(gym.Env):
 
         obs = self._get_obs()
         reward = self._compute_reward(action)
-        terminated, truncated = self._check_termination(obs)
+        terminated, truncated, goal_scored, goal_conceded = self._check_termination(obs)
+        
+        info = {
+            'goal_scored': goal_scored,
+            'goal_conceded': goal_conceded
+        }
+
         self.previous_action = action
-        return obs, reward, terminated, truncated, {}
+        return obs, reward, terminated, truncated, info
 
     def _get_mirrored_obs(self):
         ball_pos, _ = p.getBasePositionAndOrientation(self.ball_id, physicsClientId=self.client)
@@ -392,7 +401,7 @@ class FoosballEnv(gym.Env):
             lower, upper = self.joint_limits[joint_id]
             scaled[i] = lower + (action[i] + 1) / 2 * (upper - lower)
         for i, joint_id in enumerate(revs):
-            scaled[i + 4] = action[i + 4] * 10
+            scaled[i + 4] = action[i + 4] * self.max_torque
         return scaled
 
     def _apply_action(self, scaled_action, player_id):
@@ -403,8 +412,7 @@ class FoosballEnv(gym.Env):
         for i, joint_id in enumerate(slides):
             p.setJointMotorControl2(self.table_id, joint_id, p.POSITION_CONTROL, targetPosition=scaled_action[i], maxVelocity=self.max_vel, force=self.max_force, physicsClientId=self.client)
         for i, joint_id in enumerate(revs):
-            #print(f"Applying velocity {scaled_action[i + 4]} to joint {joint_id}")
-            p.setJointMotorControl2(self.table_id, joint_id, p.VELOCITY_CONTROL, targetVelocity=scaled_action[i + 4], force=self.max_force, physicsClientId=self.client)
+            p.setJointMotorControl2(self.table_id, joint_id, p.TORQUE_CONTROL, force=scaled_action[i + 4], physicsClientId=self.client)
 
     def _debug_step(self, action):
         for joint_id in self.team1_rev_joints:
@@ -420,9 +428,26 @@ class FoosballEnv(gym.Env):
         joint_pos = [state[0] for state in joint_states]
         joint_vel = [state[1] for state in joint_states]
         if self.player_id == 2:
-            ball_pos = (-ball_pos[0], ball_pos[1], ball_pos[2])
-            ball_vel = (-ball_vel[0], ball_vel[1], ball_vel[2])
+            ball_pos = (-ball_pos[0], -ball_pos[1], ball_pos[2])
+            ball_vel = (-ball_vel[0], -ball_vel[1], ball_vel[2])
         return np.concatenate([ball_pos, ball_vel, joint_pos, joint_vel]).astype(np.float32)
+
+    def get_mirrored_obs_from_unnormalized_obs(self, obs):
+        ball_pos, ball_vel, joint_pos, joint_vel = obs[:3], obs[3:6], obs[6:22], obs[22:38]
+        
+        # Mirror ball state
+        mirrored_ball_pos = np.array([-ball_pos[0], -ball_pos[1], ball_pos[2]])
+        mirrored_ball_vel = np.array([-ball_vel[0], -ball_vel[1], ball_vel[2]])
+        
+        # Mirror joint states
+        team1_pos, team2_pos = joint_pos[:8], joint_pos[8:]
+        mirrored_joint_pos = np.concatenate([team2_pos, team1_pos])
+        
+        team1_vel, team2_vel = joint_vel[:8], joint_vel[8:]
+        mirrored_joint_vel = np.concatenate([team2_vel, team1_vel])
+        
+        return np.concatenate([mirrored_ball_pos, mirrored_ball_vel, mirrored_joint_pos, mirrored_joint_vel]).astype(np.float32)
+
 
     def _compute_reward(self, action):
         ball_pos, _ = p.getBasePositionAndOrientation(self.ball_id, physicsClientId=self.client)
@@ -488,15 +513,13 @@ class FoosballEnv(gym.Env):
             reward -= self.reward_config.get('stagnation_slide_penalty', 0.05) # Get from config or default
         self.last_slide_positions = current_slide_pos
 
-        # 3b. Rotational (spin) stagnation penalty
+        # 3b. Power usage penalty
+        power_penalty_scale = self.reward_config.get('power_penalty_scale', 0.001)
         current_spin_vels = np.array([state[1] for state in p.getJointStates(self.table_id, agent_spins, physicsClientId=self.client)])
-        if np.linalg.norm(current_spin_vels - self.last_spin_velocities) < 0.01:
-            self.spin_stagnation_counter += 1
-        else:
-            self.spin_stagnation_counter = 0
-        if self.spin_stagnation_counter > self.reward_config.get('stagnation_spin_steps', 100): # Get from config or default
-            reward -= self.reward_config.get('stagnation_spin_penalty', 0.05) # Get from config or default
-        self.last_spin_velocities = current_spin_vels
+        # The torque is the action itself, scaled
+        torques = action[4:] * self.max_torque
+        power_usage = np.sum(np.abs(torques * current_spin_vels))
+        reward -= power_penalty_scale * power_usage
 
         # 4. Penalty for the ball being stuck
         if np.linalg.norm(ball_vel) < 0.01:
@@ -527,17 +550,40 @@ class FoosballEnv(gym.Env):
     def _check_termination(self, obs):
         ball_pos, ball_vel = obs[:3], obs[3:6]
         terminated, truncated = False, False
-        if (self.player_id == 1 and (ball_pos[0] > self.goal_line_x_2 or ball_pos[0] < self.goal_line_x_1)) or \
-           (self.player_id == 2 and (ball_pos[0] < self.goal_line_x_1 or ball_pos[0] > self.goal_line_x_2)):
-            terminated = True
+        goal_scored, goal_conceded = 0, 0
+
+        if self.player_id == 1:
+            if ball_pos[0] > self.goal_line_x_2:
+                terminated = True
+                goal_scored = 1
+            elif ball_pos[0] < self.goal_line_x_1:
+                terminated = True
+                goal_conceded = 1
+        else: # Player 2
+            if ball_pos[0] < self.goal_line_x_1:
+                terminated = True
+                goal_scored = 1
+            elif ball_pos[0] > self.goal_line_x_2:
+                terminated = True
+                goal_conceded = 1
+
         table_aabb = p.getAABB(self.table_id, physicsClientId=self.client)
-        if not (table_aabb[0][0] - 0.1 < ball_pos[0] < table_aabb[1][0] + 0.1 and table_aabb[0][1] - 0.1 < ball_pos[1] < table_aabb[1][1] + 0.1):
+        if not (table_aabb[0][0] - 0.1 < ball_pos[0] < table_aabb[1][0] + 0.1 and \
+                table_aabb[0][1] - 0.1 < ball_pos[1] < table_aabb[1][1] + 0.1):
             truncated = True
-        if np.linalg.norm(ball_vel) < 0.001: self.ball_stuck_counter += 1
-        else: self.ball_stuck_counter = 0
-        if self.ball_stuck_counter > self.max_stuck_steps: truncated = True
-        if self.episode_step_count > self.max_episode_steps: truncated = True
-        return terminated, truncated
+
+        if np.linalg.norm(ball_vel) < 0.001:
+            self.ball_stuck_counter += 1
+        else:
+            self.ball_stuck_counter = 0
+        
+        if self.ball_stuck_counter > self.max_stuck_steps:
+            truncated = True
+        
+        if self.episode_step_count > self.max_episode_steps:
+            truncated = True
+            
+        return terminated, truncated, goal_scored, goal_conceded
 
     def close(self):
         p.disconnect(self.client)

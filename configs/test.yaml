@@ -11,19 +11,21 @@ environment:
   
   # Rod physics
   rod_linear_damping: 1.0
-  rod_angular_damping: 1.0
+  rod_angular_damping: 0.00
+  rod_joint_friction: 0.0
   rod_restitution: 0.7
   
   # Motor controls
-  max_velocity: 1.5
-  max_force: 1.0
+  max_velocity: 3.0
+  max_force: 3.0
+  max_torque: 20.0
   
   # Goal lines
   goal_line_x_1: -0.725  # Team 1 (Red) goal
   goal_line_x_2: 0.725   # Team 2 (Blue) goal
   
   # Ball stuck detection
-  max_stuck_steps: 500
+  max_stuck_steps: 1000
 
 reward:
   # Dense reward scaling (reduced to balance sparse rewards)
@@ -37,8 +39,8 @@ reward:
   midfield_reward_weight: 0.0001      # Reward for keeping the ball in the middle of the field
   
   # Sparse reward scaling (scaled down from original)
-  goal_reward: 30.0             # Reward for scoring goal
-  concede_penalty: 15.0          # Penalty for opponent scoring
+  goal_reward: 300.0             # Reward for scoring goal
+  concede_penalty: 150.0          # Penalty for opponent scoring
   
   # Ball stuck penalties (old)
   # stuck_penalty_threshold: 1000   # Steps before penalty
@@ -47,8 +49,7 @@ reward:
   # New penalties
   stagnation_slide_steps: 100        # Steps before slide stagnation penalty applies
   stagnation_slide_penalty: 0.001    # Penalty for slide stagnation
-  stagnation_spin_steps: 100         # Steps before spin stagnation penalty applies
-  stagnation_spin_penalty: 0.001     # Penalty for spin stagnation
+  power_penalty_scale: 0.001         # Penalty for power usage
   stuck_penalty_threshold: 300       # Steps before ball stuck penalty applies
   stuck_penalty_per_step: 0.005       # Penalty per step when ball is stuck
   inactivity_threshold: 0.001        # Ball velocity below which inactivity penalty applies
@@ -95,8 +96,8 @@ curriculum:
 training:
   # PPO hyperparameters
   learning_rate: 3e-4
-  batch_size: 64
-  n_steps: 2048
+  batch_size: 512
+  n_steps: 4096
   n_epochs: 10
   gamma: 0.99
   gae_lambda: 0.95

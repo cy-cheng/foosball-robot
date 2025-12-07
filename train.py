@@ -27,27 +27,6 @@ class SelfPlayCallback(BaseCallback):
         return True
 
 
-class RewardLoggerCallback(BaseCallback):
-    """
-    A custom callback to log mean episodic reward to the console.
-    """
-    def __init__(self, check_freq: int, verbose: int = 1):
-        super(RewardLoggerCallback, self).__init__(verbose)
-        self.check_freq = check_freq
-
-    def _on_step(self) -> bool:
-        if self.n_calls % self.check_freq == 0:
-            # The ep_info_buffer is a deque of dicts {'r': reward, 'l': length, 't': timestamp}
-            if hasattr(self.training_env, 'ep_info_buffer'):
-                ep_info_buffer = self.training_env.ep_info_buffer
-                if ep_info_buffer:
-                    # Calculate the mean reward from all episodes in the buffer
-                    mean_reward = sum([info['r'] for info in ep_info_buffer]) / len(ep_info_buffer)
-                    if self.verbose > 0:
-                        print(f"Timestep: {self.num_timesteps}, Mean Episode Reward: {mean_reward:.2f}")
-        return True
-
-
 def train_stage(stage, full_config, load_checkpoint=None):
     """Train a specific curriculum stage."""
     
@@ -111,7 +90,7 @@ def train_stage(stage, full_config, load_checkpoint=None):
         save_path="saves/",
         name_prefix=f"stage_{stage}_ckpt"
     )
-    reward_logger_callback = RewardLoggerCallback(check_freq=1000)
+    
 
     # --- Environment Setup ---
     def make_env(rank, _num_envs_render_arg=num_envs_render):
@@ -130,8 +109,9 @@ def train_stage(stage, full_config, load_checkpoint=None):
             )
         return _init
 
-    # Create the vectorized environment
+    # Create the vectorized environment and wrap it with VecMonitor
     vec_env = SubprocVecEnv([make_env(i) for i in range(num_envs)])
+    vec_env = VecMonitor(vec_env, info_keywords=("goal_scored", "goal_conceded"))
     
     # Load normalization stats if a checkpoint is provided
     vec_normalize_path = None
@@ -178,7 +158,7 @@ def train_stage(stage, full_config, load_checkpoint=None):
         
         # Setup self-play callback
         self_play_callback = SelfPlayCallback(update_freq=100_000)
-        callbacks = [checkpoint_callback, self_play_callback, reward_logger_callback]
+        callbacks = [checkpoint_callback, self_play_callback]
 
     else: # Stages 1, 2, 3
         if load_checkpoint and os.path.exists(load_checkpoint):
@@ -191,7 +171,7 @@ def train_stage(stage, full_config, load_checkpoint=None):
             model_params["tensorboard_log"] = log_dir
             model = PPO(env=env, **model_params)
         
-        callbacks = [checkpoint_callback, reward_logger_callback]
+        callbacks = [checkpoint_callback]
 
     # --- Training ---
     print(f"\n🚀 Training Stage {stage}...\n")
@@ -294,5 +274,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 

@@ -11,12 +11,13 @@ environment:
   
   # Rod physics
   rod_linear_damping: 1.0
-  rod_angular_damping: 1.0
+  rod_angular_damping: 0.1
   rod_restitution: 0.7
   
   # Motor controls
   max_velocity: 1.5
   max_force: 1.0
+  max_torque: 2.0
   
   # Goal lines
   goal_line_x_1: -0.725  # Team 1 (Red) goal
@@ -42,8 +43,7 @@ reward:
   # New penalties
   stagnation_slide_steps: 100        # Steps before slide stagnation penalty applies
   stagnation_slide_penalty: 0.0001    # Penalty for slide stagnation
-  stagnation_spin_steps: 100         # Steps before spin stagnation penalty applies
-  stagnation_spin_penalty: 0.0001     # Penalty for spin stagnation
+  power_penalty_scale: 0.001         # Penalty for power usage
   stuck_penalty_threshold: 500       # Steps before ball stuck penalty applies
   stuck_penalty_per_step: 0.005       # Penalty per step when ball is stuck
   inactivity_threshold: 0.001        # Ball velocity below which inactivity penalty applies
