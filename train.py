@@ -77,8 +77,11 @@ def train_stage(stage, full_config, load_checkpoint=None):
 )
     
     # Create directories
-    os.makedirs("saves", exist_ok=True)
     os.makedirs("logs", exist_ok=True)
+    
+    # Determine save path for checkpoints and ensure it exists
+    checkpoint_save_path = save_path if save_path else "saves/"
+    os.makedirs(checkpoint_save_path, exist_ok=True)
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_dir = f"logs/stage_{stage}_{timestamp}"
@@ -87,7 +90,7 @@ def train_stage(stage, full_config, load_checkpoint=None):
     # Callbacks
     checkpoint_callback = CheckpointCallback(
         save_freq=checkpoint_freq,
-        save_path="saves/",
+        save_path=checkpoint_save_path,
         name_prefix=f"stage_{stage}_ckpt"
     )
     
