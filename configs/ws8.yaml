@@ -107,7 +107,7 @@ training:
   
   # Early stopping and curriculum
   curriculum_enabled: true
-  curriculum_progression_goals: 64  # Goals needed to advance stages
+  curriculum_progression_goals: 512  # Goals needed to advance stages
 
 physics:
   gravity: -9.81
