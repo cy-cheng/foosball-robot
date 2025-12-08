@@ -1,0 +1,111 @@
+# Foosball RL Training Configuration - Win Rate Curriculum
+
+environment:
+  ball_radius: 0.025
+  ball_mass: 0.025
+  ball_restitution: 0.8
+  ball_rolling_friction: 0.001
+  ball_spinning_friction: 0.001
+  ball_lateral_friction: 0.01
+  rod_linear_damping: 1.0
+  rod_angular_damping: 0.1
+  rod_restitution: 0.7
+  max_velocity: 0.75
+  max_force: 1.0
+  max_torque: 0.8
+  goal_line_x_1: -0.725
+  goal_line_x_2: 0.725
+  max_stuck_steps: 500
+
+reward:
+  # 維持 "Balanced" 版本的數值設定，確保數值穩定
+  goal_reward: 10.0
+  concede_penalty: 5.0
+  ball_velocity_scale: 0.01
+  contact_reward: 0.005
+  player_ball_distance_scale: 0.001 
+  stagnation_slide_steps: 150
+  stagnation_slide_penalty: 0.01
+  power_penalty_scale: 0.0001
+  rod_angle_penalty_scale: 0.001  
+  stuck_penalty_threshold: 500
+  stuck_penalty_per_step: 0.005
+  inactivity_threshold: 0.01
+  inactivity_penalty: 0.005
+  midfield_reward_weight: 0.0
+  ball_movement_scale: 0.0
+
+curriculum:
+  stage_1:
+    name: "Dribble"
+    description: "Ball stationary - learn basic hitting"
+    # [修改] 改回超大步數，作為 "Timeout" 上限
+    duration_steps: 201_000_000 
+    max_episode_steps: 500
+    ball_spawn_x_range: [[-0.625, -0.55], [-0.45, -0.375], [-0.10, -0.02], [0.275, 0.35]]
+    ball_spawn_y_range: [-0.3, 0.3]
+    ball_velocity_range: [-0.1, 0.1]
+    
+  stage_2:
+    name: "Pass"
+    description: "Ball rolling toward you - learn interception"
+    duration_steps: 202_000_000
+    max_episode_steps: 800
+    ball_spawn_x: [[-0.6, -0.5], [-0.4, -0.3], [-0.05, 0.075], [0.275, 0.4]]
+    ball_spawn_y_range: [-0.3, 0.3]
+    ball_velocity_range: [-1.0, -0.3]
+    
+  stage_3:
+    name: "Defend"
+    description: "Ball shot fast at goal - learn defense"
+    duration_steps: 103_000_000
+    max_episode_steps: 650
+    ball_spawn_x_range: [[-0.5, -0.475], [-0.40, -0.275]]
+    ball_spawn_y_range: [-0.25, 0.25]
+    ball_velocity_speed_range: [2.5, 4.0]
+    
+  stage_4:
+    name: "Full Game"
+    description: "Random play - learn complete strategy"
+    duration_steps: 525_000_000
+    max_episode_steps: 5000
+    ball_spawn_x_range: [[-0.6, 0.6]]
+    ball_spawn_y_range: [-0.3, 0.3]
+    ball_velocity_range: [-1.0, 1.0]
+
+training:
+  learning_rate: 1e-4
+  batch_size: 128
+  n_steps: 2048
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.1
+  entropy_coefficient: 0.0
+  num_parallel_envs: 32
+  num_envs_render: 0
+  checkpoint_freq: 1_000_000
+  save_path: "saves/ws8"
+
+  # [新增] 課程推進條件 (Curriculum Progression Requirements)
+  curriculum_enabled: true
+  
+  # 條件 1: 最低進球數 (Goal > 100)
+  progression_min_goals: 100
+  
+  # 條件 2: 最低勝率 (Goal / (Goal + Concede) > 0.8)
+  progression_win_rate: 0.8
+
+physics:
+  gravity: -9.81
+  physics_substeps: 4
+  simulation_timestep: 0.0041666667
+
+rod_mapping:
+  red_rods: [1, 2, 4, 6]
+  blue_rods: [8, 7, 5, 3]
+  action_mapping:
+    1: 8
+    2: 7
+    4: 5
+    6: 3
