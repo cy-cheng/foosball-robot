@@ -10,9 +10,9 @@ environment:
   rod_linear_damping: 1.0
   rod_angular_damping: 0.1
   rod_restitution: 0.7
-  max_velocity: 0.75
+  max_velocity: 0.5
   max_force: 1.0
-  max_torque: 0.8
+  max_torque: 0.9
   goal_line_x_1: -0.725
   goal_line_x_2: 0.725
   max_stuck_steps: 500
