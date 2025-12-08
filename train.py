@@ -91,7 +91,8 @@ def train_stage(stage, full_config, load_checkpoint=None):
     checkpoint_callback = CheckpointCallback(
         save_freq=checkpoint_freq,
         save_path=checkpoint_save_path,
-        name_prefix=f"stage_{stage}_ckpt"
+        name_prefix=f"stage_{stage}_ckpt",
+        save_vecnormalize=True
     )
     
 
