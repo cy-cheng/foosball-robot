@@ -108,7 +108,7 @@ training:
   # Early stopping and curriculum
   curriculum_enabled: true
   curriculum_progression_goals: 512  # Goals needed to advance stages
-  save_path: "saves/ws7"
+  save_path: "saves/ws5"
 
 physics:
   gravity: -9.81
