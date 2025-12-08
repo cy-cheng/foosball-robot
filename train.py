@@ -5,6 +5,7 @@ from datetime import datetime
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import CheckpointCallback, BaseCallback
 from stable_baselines3.common.vec_env import SubprocVecEnv, VecMonitor, VecNormalize
+from typing import Dict, Any
 
 from foosball_env import FoosballEnv
 from foosball_utils import load_config, get_config_value
@@ -23,9 +24,56 @@ class SelfPlayCallback(BaseCallback):
 
     def _on_step(self) -> bool:
         if self.n_calls % self.update_freq == 0:
+            # 將目前模型的策略權重，傳輸給環境中的對手模型
             self.training_env.env_method("update_opponent_model", self.model.policy.to("cpu").state_dict())
         return True
 
+class CurriculumCallback(BaseCallback):
+    """
+    當達到以下雙重標準時，停止訓練（進入下一關）：
+    1. 總進球數 > min_goals
+    2. 勝率 (進球 / (進球+失球)) > win_rate_threshold
+    """
+    def __init__(self, min_goals: int, win_rate_threshold: float, check_freq: int = 5000, verbose: int = 1):
+        super().__init__(verbose)
+        self.min_goals = min_goals
+        self.win_rate_threshold = win_rate_threshold
+        self.check_freq = check_freq
+        
+        # 累計數據
+        self.total_goals = 0
+        self.total_conceded = 0
+        
+    def _on_step(self) -> bool:
+        # 1. 累計進球與失球
+        infos = self.locals.get("infos", [])
+        for info in infos:
+            self.total_goals += info.get("goal_scored", 0)
+            self.total_conceded += info.get("goal_conceded", 0)
+        
+        # 2. 定期檢查
+        if self.n_calls % self.check_freq == 0:
+            total_games = self.total_goals + self.total_conceded
+            current_win_rate = 0.0
+            if total_games > 0:
+                current_win_rate = self.total_goals / total_games
+            
+            if self.verbose > 0:
+                stage_level = self.training_env.envs[0].curriculum_level if hasattr(self.training_env, 'envs') else "N/A"
+                print(f"[{self.num_timesteps} steps] Stage {stage_level} Stats:")
+                print(f"   - Goals: {self.total_goals} / {self.min_goals}")
+                print(f"   - Win Rate: {current_win_rate:.2%} (Target: {self.win_rate_threshold:.2%})")
+                print(f"   - (Scored: {self.total_goals}, Conceded: {self.total_conceded})")
+
+            # 3. 雙重條件檢查
+            if self.total_goals >= self.min_goals and current_win_rate >= self.win_rate_threshold:
+                print(f"\n🎉 恭喜！達成晉級標準！")
+                print(f"   - 總進球: {self.total_goals} (>= {self.min_goals})")
+                print(f"   - 勝率: {current_win_rate:.2%} (>= {self.win_rate_threshold:.2%})")
+                print("   -> 提早結束本關卡，準備進入下一關。")
+                return False  # 停止訓練
+                
+        return True
 
 def train_stage(stage, full_config, load_checkpoint=None):
     """Train a specific curriculum stage."""
@@ -39,7 +87,12 @@ def train_stage(stage, full_config, load_checkpoint=None):
     checkpoint_freq = training_config['checkpoint_freq']
     num_envs_render = training_config['num_envs_render']
     save_path = training_config.get('save_path')
-
+    
+    # 【修改】讀取 Curriculum 相關設定
+    curriculum_enabled = training_config.get('curriculum_enabled', False)
+    progression_min_goals = training_config.get('progression_min_goals', 100)
+    progression_win_rate = training_config.get('progression_win_rate', 0.8)
+    
     # Ensure num_envs is at least num_envs_render if rendering is enabled
     if num_envs_render > 0 and num_envs < num_envs_render:
         print(f"Warning: num_parallel_envs ({num_envs}) is less than num_envs_render ({num_envs_render}). Setting num_parallel_envs to num_envs_render.")
@@ -47,7 +100,13 @@ def train_stage(stage, full_config, load_checkpoint=None):
     
     # Extract stage-specific parameters
     stage_steps = stage_config['duration_steps']
-    max_episode_steps = stage_config.get('max_episode_steps', 2000) # Default if not specified, though it should be in config
+    max_episode_steps = stage_config.get('max_episode_steps', 2000)
+    
+    # 【修改】PPO policy_kwargs：加入 log_std_init 修正 std 爆炸
+    policy_kwargs = dict(
+        # 預設為 -1，可透過 YAML 設定檔中的 'log_std_init' 覆蓋
+        log_std_init=training_config.get('log_std_init', -1) 
+    )
     
     # PPO hyperparameters (common for all stages unless overridden)
     ppo_params = {
@@ -55,12 +114,13 @@ def train_stage(stage, full_config, load_checkpoint=None):
         "learning_rate": learning_rate,
         "batch_size": training_config['batch_size'],
         "n_steps": training_config['n_steps'],
-        "n_epochs": training_config['n_epochs'], # Corrected typo
+        "n_epochs": training_config['n_epochs'],
         "gamma": training_config['gamma'],
         "gae_lambda": training_config['gae_lambda'],
         "clip_range": training_config['clip_range'],
         "ent_coef": training_config['entropy_coefficient'],
         "verbose": 1,
+        "policy_kwargs": policy_kwargs, # <--- 傳入 policy_kwargs
     }
 
     print(f"""
@@ -70,9 +130,11 @@ def train_stage(stage, full_config, load_checkpoint=None):
 ╚════════════════════════════════════════════════════════════════════╝
 
   Focus: {stage_config.get('focus', 'N/A')}
-  Steps: {stage_steps:,}
+  Steps (Max): {stage_steps:,}
+  Goal (Progress): {progression_min_goals:,} Goals
   Parallel Envs: {num_envs}
   Learning Rate: {learning_rate}
+  Initial Log Std: {policy_kwargs.get('log_std_init')}
 """
 )
     
@@ -95,6 +157,15 @@ def train_stage(stage, full_config, load_checkpoint=None):
         save_vecnormalize=True
     )
     
+    # 【新增】Curriculum Callback 實例化
+    curriculum_callback = None
+    if curriculum_enabled:
+        curriculum_callback = CurriculumCallback(
+            min_goals=progression_min_goals,
+            win_rate_threshold=progression_win_rate,
+            check_freq=training_config.get('curriculum_check_freq', 5000)
+        )
+
 
     # --- Environment Setup ---
     def make_env(rank, _num_envs_render_arg=num_envs_render):
@@ -133,9 +204,10 @@ def train_stage(stage, full_config, load_checkpoint=None):
     if stage == 4:
         print("Setting up self-play for Stage 4...")
         
+        # ... (Stage 4 model loading/creation logic unchanged) ...
         if load_checkpoint and os.path.exists(load_checkpoint):
             print(f"✅ Loading checkpoint for agent and opponent: {load_checkpoint}")
-            model = PPO.load(load_checkpoint, env=env)
+            model = PPO.load(load_checkpoint, env=env, **ppo_params) # 【修正】新增 ppo_params
             opponent_model = PPO.load(load_checkpoint)
         else:
             print("🆕 No valid checkpoint provided for Stage 4. Creating a new model from scratch.")
@@ -162,12 +234,16 @@ def train_stage(stage, full_config, load_checkpoint=None):
         
         # Setup self-play callback
         self_play_callback = SelfPlayCallback(update_freq=100_000)
+        
+        # 【修改】添加 CurriculumCallback
         callbacks = [checkpoint_callback, self_play_callback]
+        if curriculum_callback:
+            callbacks.append(curriculum_callback)
 
     else: # Stages 1, 2, 3
         if load_checkpoint and os.path.exists(load_checkpoint):
             print(f"✅ Loading checkpoint: {load_checkpoint}")
-            model = PPO.load(load_checkpoint, env=env)
+            model = PPO.load(load_checkpoint, env=env, **ppo_params) # 【修正】新增 ppo_params
             print(f"   Model loaded and environment set!")
         else:
             print(f"🆕 Creating new model for Stage {stage}")
@@ -175,11 +251,15 @@ def train_stage(stage, full_config, load_checkpoint=None):
             model_params["tensorboard_log"] = log_dir
             model = PPO(env=env, **model_params)
         
+        # 【修改】添加 CurriculumCallback
         callbacks = [checkpoint_callback]
+        if curriculum_callback:
+            callbacks.append(curriculum_callback)
 
     # --- Training ---
     print(f"\n🚀 Training Stage {stage}...\n")
     try:
+        # model.learn() 將會被 CurriculumCallback 提早中斷
         model.learn(
             total_timesteps=stage_steps,
             callback=callbacks,
@@ -188,7 +268,7 @@ def train_stage(stage, full_config, load_checkpoint=None):
     except KeyboardInterrupt:
         print("\n⚠️  Training interrupted!")
 
-    # --- Saving ---
+    # ... (Saving logic remains the same) ...
     if save_path:
         stage_checkpoint_path = f"{save_path}-{stage}"
     else:
@@ -255,11 +335,13 @@ def main():
         # Run all stages sequentially
         checkpoint = args.load
         for stage in range(1, 5):
+            # train_stage 結束時會存檔，所以下一關要讀取最新的檔
             train_stage(
                 stage=stage,
                 full_config=full_config,
                 load_checkpoint=checkpoint,
             )
+            # 更新 checkpoint path
             if save_path:
                 checkpoint = f"{save_path}-{stage}.zip"
             else:
@@ -278,6 +360,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
