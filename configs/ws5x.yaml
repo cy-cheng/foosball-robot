@@ -84,7 +84,7 @@ training:
   entropy_coefficient: 0.0
   num_parallel_envs: 32
   num_envs_render: 0
-  checkpoint_freq: 1_000_000
+  checkpoint_freq: 200_000
   save_path: "saves/ws8"
 
   # [新增] 課程推進條件 (Curriculum Progression Requirements)
