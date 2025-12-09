@@ -85,7 +85,7 @@ training:
   num_parallel_envs: 32
   num_envs_render: 0
   checkpoint_freq: 200_000
-  save_path: "saves/ws8"
+  save_path: "saves/ws9"
 
   # [新增] 課程推進條件 (Curriculum Progression Requirements)
   curriculum_enabled: true
@@ -94,7 +94,7 @@ training:
   progression_min_goals: 150
   
   # 條件 2: 最低勝率 (Goal / (Goal + Concede) > 0.8)
-  progression_win_rate: 0.7
+  progression_win_rate: 0.5
 
 physics:
   gravity: -9.81
