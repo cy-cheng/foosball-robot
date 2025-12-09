@@ -10,29 +10,29 @@ environment:
   rod_linear_damping: 1.0
   rod_angular_damping: 0.1
   rod_restitution: 0.7
-  max_velocity: 1.0
+  max_velocity: 0.45
   max_force: 1.0
-  max_torque: 10.0
+  max_torque: 6.0
   goal_line_x_1: -0.725
   goal_line_x_2: 0.725
   max_stuck_steps: 500
 
 reward:
   # 維持 "Balanced" 版本的數值設定，確保數值穩定
-  goal_reward: 20.0
-  concede_penalty: 18.0
-  ball_velocity_scale: 0.02
-  contact_reward: 0.01
+  goal_reward: 50.0
+  concede_penalty: 45.0
+  ball_velocity_scale: 0.01
+  contact_reward: 0.005
   player_ball_distance_scale: 0.001 
   stagnation_slide_steps: 150
-  stagnation_slide_penalty: 0.03
-  power_penalty_scale: 0.0001
-  rod_angle_penalty_scale: 0.0000
+  stagnation_slide_penalty: 0.01
+  power_penalty_scale: 0.0002
+  rod_angle_penalty_scale: 0.0002
   stuck_penalty_threshold: 500
   stuck_penalty_per_step: 0.005
   inactivity_threshold: 0.01
   inactivity_penalty: 0.008
-  midfield_reward_weight: 0.001
+  midfield_reward_weight: 0.01
   ball_movement_scale: 0.003
 
 curriculum:
@@ -42,7 +42,7 @@ curriculum:
     # [修改] 改回超大步數，作為 "Timeout" 上限
     duration_steps: 201_000_000 
     max_episode_steps: 500
-    ball_spawn_x_range: [[-0.625, -0.55], [-0.45, -0.375], [-0.10, -0.02], [0.275, 0.35]]
+    ball_spawn_x_range: [[-0.625, -0.55], [-0.45, -0.375], [-0.10, -0.02], [-0.10, -0.02], [0.275, 0.35], [0.275, 0.35], [0.275, 0.35]]
     ball_spawn_y_range: [-0.3, 0.3]
     ball_velocity_range: [-0.1, 0.1]
     
@@ -82,8 +82,8 @@ training:
   gae_lambda: 0.95
   clip_range: 0.1
   entropy_coefficient: 0.0
-  num_parallel_envs: 32
-  num_envs_render: 0
+  num_parallel_envs: 1
+  num_envs_render: 1
   checkpoint_freq: 200_000
   save_path: "saves/ws9"
 
@@ -94,7 +94,7 @@ training:
   progression_min_goals: 150
   
   # 條件 2: 最低勝率 (Goal / (Goal + Concede) > 0.8)
-  progression_win_rate: 0.6
+  progression_win_rate: 0.5
 
 physics:
   gravity: -9.81
