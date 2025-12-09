@@ -12,21 +12,21 @@ environment:
   rod_restitution: 0.7
   max_velocity: 0.75
   max_force: 1.0
-  max_torque: 0.8
+  max_torque: 3.0
   goal_line_x_1: -0.725
   goal_line_x_2: 0.725
   max_stuck_steps: 500
 
 reward:
   # 維持 "Balanced" 版本的數值設定，確保數值穩定
-  goal_reward: 72.0
-  concede_penalty: 33.0
+  goal_reward: 40.0
+  concede_penalty: 35.0
   ball_velocity_scale: 0.03
   contact_reward: 0.005
   player_ball_distance_scale: 0.001
   stagnation_slide_steps: 150
   stagnation_slide_penalty: 0.01
-  power_penalty_scale: 0.0001
+  power_penalty_scale: 0.01
   rod_angle_penalty_scale: 0.001  
   stuck_penalty_threshold: 500
   stuck_penalty_per_step: 0.005
