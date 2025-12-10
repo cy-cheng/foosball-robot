@@ -1,13 +1,13 @@
-# Foosball RL Training Configuration - Win Rate Curriculum (Tuned for Kicking)
+# Foosball RL Training Configuration - Action Repeat & Large Batch Stability
 
 environment:
   ball_radius: 0.025
   ball_mass: 0.025
   ball_restitution: 0.8
-  ball_rolling_friction: 0.01   # Increased to prevent infinite sliding
-  ball_spinning_friction: 0.01  # Increased to allow spin interactions
-  ball_lateral_friction: 0.1    # CRITICAL: High friction allows "grip" for kicking
-  rod_linear_damping: 0.1       # Reduced: Allows snappy, fast movement
+  ball_rolling_friction: 0.01   
+  ball_spinning_friction: 0.01  
+  ball_lateral_friction: 0.1    
+  rod_linear_damping: 0.1       
   rod_angular_damping: 0.1
   rod_restitution: 0.7
   max_velocity: 1.0
@@ -24,14 +24,19 @@ reward:
   
   # Dense Rewards
   ball_velocity_scale: 0.02
-  contact_reward: 0.008
-  player_ball_distance_scale: 0.001 
+  
+  # Set to 0 because we handle the +5.0 First Touch bonus in code
+  contact_reward: 0.0 
+  
+  # Increased significantly to guide agent to the ball in Stage 1
+  player_ball_distance_scale: 0.1 
+  
   midfield_reward_weight: 0.001
   ball_movement_scale: 0.003
   
-  # Penalties
+  # Penalties (Reduced for initial stability)
   stagnation_slide_steps: 150
-  stagnation_slide_penalty: 0.03
+  stagnation_slide_penalty: 0.0
   power_penalty_scale: 0.0
   rod_angle_penalty_scale: 0.003
   stuck_penalty_threshold: 500
@@ -78,19 +83,24 @@ curriculum:
 
 training:
   learning_rate: 3e-4
-  batch_size: 128
-  n_steps: 2048
-  n_epochs: 20
-  gamma: 0.99
+  
+  # LARGE BATCH CONFIGURATION
+  # n_steps: 512 * 32 envs = 16,384 samples collected
+  # batch_size: 4096 ensures robust updates using 4k samples per gradient step
+  n_steps: 512       
+  batch_size: 4096
+  n_epochs: 4
+  
+  gamma: 0.99        # 30Hz horizon
   gae_lambda: 0.95
   clip_range: 0.1
-  entropy_coefficient: 0.01   # Slight increase to prevent early mode collapse
+  entropy_coefficient: 0.01
+  
   num_parallel_envs: 32
   num_envs_render: 0
   checkpoint_freq: 200_000
   save_path: "saves/ws9"
 
-  # Curriculum Progression Requirements
   curriculum_enabled: true
   progression_min_goals: 150
   progression_win_rate: 0.6
