@@ -6,7 +6,7 @@ environment:
   ball_restitution: 0.8
   ball_rolling_friction: 0.01   # Increased to prevent infinite sliding
   ball_spinning_friction: 0.01  # Increased to allow spin interactions
-  ball_lateral_friction: 0.8    # CRITICAL: High friction allows "grip" for kicking
+  ball_lateral_friction: 0.1    # CRITICAL: High friction allows "grip" for kicking
   rod_linear_damping: 0.1       # Reduced: Allows snappy, fast movement
   rod_angular_damping: 0.1
   rod_restitution: 0.7
@@ -15,16 +15,16 @@ environment:
   max_torque: 5.0
   goal_line_x_1: -0.725
   goal_line_x_2: 0.725
-  max_stuck_steps: 500
+  max_stuck_steps: 525
 
 reward:
   # Goal Rewards
-  goal_reward: 20.0
-  concede_penalty: 18.0
+  goal_reward: 10.0
+  concede_penalty: 8.0
   
   # Dense Rewards
   ball_velocity_scale: 0.02
-  contact_reward: 0.01
+  contact_reward: 0.008
   player_ball_distance_scale: 0.001 
   midfield_reward_weight: 0.001
   ball_movement_scale: 0.003
