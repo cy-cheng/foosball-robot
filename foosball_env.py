@@ -9,7 +9,10 @@ from gymnasium import spaces
 class FoosballEnv(gym.Env):
     """
     Multi-Agent Foosball Environment.
-    Updated: Adjusted rewards to force STRIKING instead of HUGGING.
+    Updated: 
+    - Alignment Reward (Force tracking)
+    - Stagnation Penalty (Kill laziness)
+    - Goal Reporting in Info
     """
     metadata = {'render.modes': ['human', 'direct']}
 
@@ -69,7 +72,6 @@ class FoosballEnv(gym.Env):
         self.slide_stagnation_counter = np.zeros(4)
         self.last_slide_pos = np.zeros(4)
         
-        # Persistence Holders
         self.agent_targets = np.zeros((4, 2)) 
         self.opponent_targets = np.zeros((4, 2))
         
@@ -107,16 +109,13 @@ class FoosballEnv(gym.Env):
                 for i in range(num_joints):
                     info = p.getJointInfo(self.table_id, i, physicsClientId=self.client)
                     name = info[1].decode('utf-8')
-                    
                     if f"rod_{rod_num}" in name and "slide" in name:
                         slide_id = i
                         self.joint_limits[slide_id] = (info[8], info[9]) 
                         p.setJointMotorControl2(self.table_id, i, p.VELOCITY_CONTROL, force=0, physicsClientId=self.client)
-                    
                     if f"rod_{rod_num}" in name and "rotate" in name:
                         rot_id = i
                         p.setJointMotorControl2(self.table_id, i, p.VELOCITY_CONTROL, force=0, physicsClientId=self.client)
-                
                 if slide_id != -1 and rot_id != -1:
                     joints_list.append((slide_id, rot_id))
             return joints_list
@@ -126,9 +125,7 @@ class FoosballEnv(gym.Env):
 
     def reset(self, seed=None, options=None):
         if seed: np.random.seed(seed)
-        
         self.episode_step_count = 0 
-        
         p.resetBaseVelocity(self.ball_id, [0,0,0], [0,0,0], physicsClientId=self.client)
         for i in range(p.getNumJoints(self.table_id, physicsClientId=self.client)):
             p.resetJointState(self.table_id, i, 0, 0, physicsClientId=self.client)
@@ -140,67 +137,49 @@ class FoosballEnv(gym.Env):
         
         active_rod_slide_pos = 0.0
 
-        # --- 1. RANDOMIZE AGENTS ---
         for i in range(4):
             slide_joint = self.agent_joints[i][0]
             lower, upper = self.joint_limits[slide_joint]
-            
             eff_lower = max(lower, -0.3)
             eff_upper = min(upper, 0.3)
-            
             random_slide = np.random.uniform(eff_lower, eff_upper)
             random_rot = 0.0 
-            
             p.resetJointState(self.table_id, slide_joint, targetValue=random_slide, physicsClientId=self.client)
             self.agent_targets[i] = [random_slide, random_rot]
-            
+            self.last_slide_pos[i] = random_slide # Init last pos
             if i == self.active_agent_idx:
                 active_rod_slide_pos = random_slide
 
-        # --- 2. RANDOMIZE OPPONENTS ---
         for i in range(4):
             slide_joint = self.opponent_joints[i][0]
             lower, upper = self.joint_limits[slide_joint]
-            
             eff_lower = max(lower, -0.3)
             eff_upper = min(upper, 0.3)
-            
             random_slide = np.random.uniform(eff_lower, eff_upper)
             random_rot = 0.0 
-            
             p.resetJointState(self.table_id, slide_joint, targetValue=random_slide, physicsClientId=self.client)
             self.opponent_targets[i] = [random_slide, random_rot]
 
-        # --- 3. SPAWN BALL ---
         slide_joint = self.agent_joints[self.active_agent_idx][0]
         rod_state = p.getLinkState(self.table_id, slide_joint, physicsClientId=self.client)
         rod_x = rod_state[0][0]
-        
-        # 2cm offset (Almost touching)
         spawn_offset_x = 0.02 if self.player_id == 1 else -0.02
         spawn_offset_x += np.random.uniform(-0.002, 0.002)
-        
         ball_x = rod_x + spawn_offset_x
         ball_y = active_rod_slide_pos + np.random.uniform(-0.02, 0.02)
         ball_y = np.clip(ball_y, -0.3, 0.3)
-        
         p.resetBasePositionAndOrientation(self.ball_id, [ball_x, ball_y, 0.55], [0,0,0,1], physicsClientId=self.client)
         
         self.has_touched_ball = [False] * 4
         self.slide_stagnation_counter = np.zeros(4)
-        self.last_slide_pos = np.zeros(4)
         
-        for i in range(4):
-            sid = self.agent_joints[i][0]
-            self.last_slide_pos[i] = p.getJointState(self.table_id, sid, physicsClientId=self.client)[0]
-
         return self._get_obs(), {}
 
     def step(self, actions):
         self.episode_step_count += 1 
         rewards = np.zeros(4)
+        info = {'goal_scored': 0} # Logable info
         
-        # Update Targets (Active Only)
         i = self.active_agent_idx
         slide_id = self.agent_joints[i][0]
         lower, upper = self.joint_limits[slide_id]
@@ -211,17 +190,13 @@ class FoosballEnv(gym.Env):
         
         self.agent_targets[i] = [target_slide, target_rot]
         
-        # --- PHYSICS LOOP ---
         for _ in range(self.action_repeat):
-            # Apply Targets
             for j in range(4):
-                # Agent
                 s_id, r_id = self.agent_joints[j]
                 t_s, t_r = self.agent_targets[j]
                 p.setJointMotorControl2(self.table_id, s_id, p.POSITION_CONTROL, targetPosition=t_s, force=self.env_config['max_force'], maxVelocity=self.env_config['max_velocity'], physicsClientId=self.client)
                 p.setJointMotorControl2(self.table_id, r_id, p.POSITION_CONTROL, targetPosition=t_r, force=self.env_config['max_torque'], maxVelocity=15.0, physicsClientId=self.client)
                 
-                # Opponent
                 s_id, r_id = self.opponent_joints[j]
                 t_s, t_r = self.opponent_targets[j]
                 p.setJointMotorControl2(self.table_id, s_id, p.POSITION_CONTROL, targetPosition=t_s, force=self.env_config['max_force'], maxVelocity=self.env_config['max_velocity'], physicsClientId=self.client)
@@ -229,7 +204,6 @@ class FoosballEnv(gym.Env):
 
             p.stepSimulation(physicsClientId=self.client)
             rewards += self._compute_physics_rewards()
-            
             if self.render_mode == 'human':
                 time.sleep(1.0/240.0)
 
@@ -239,65 +213,85 @@ class FoosballEnv(gym.Env):
         obs = self._get_obs()
         terminated, truncated = self._check_termination()
         
-        # --- GOAL REWARDS (Restored) ---
         if terminated:
             ball_pos = p.getBasePositionAndOrientation(self.ball_id, physicsClientId=self.client)[0]
-            # Player 1 Scoring (Right side > X2)
+            
+            # Goal Detection
+            score = False
             if self.player_id == 1:
                 if ball_pos[0] > self.goal_line_x_2: 
+                    score = True
                     rewards[self.active_agent_idx] += self.reward_config['goal_reward']
                 elif ball_pos[0] < self.goal_line_x_1:
                     rewards[self.active_agent_idx] -= self.reward_config['goal_reward']
-            # Player 2 Scoring (Left side < X1)
             elif self.player_id == 2:
                 if ball_pos[0] < self.goal_line_x_1:
+                    score = True
                     rewards[self.active_agent_idx] += self.reward_config['goal_reward']
                 elif ball_pos[0] > self.goal_line_x_2:
                     rewards[self.active_agent_idx] -= self.reward_config['goal_reward']
+            
+            if score:
+                info['goal_scored'] = 1
 
-        return obs, rewards, terminated, truncated, {}
+        return obs, rewards, terminated, truncated, info
 
     def _compute_physics_rewards(self):
         step_rewards = np.zeros(4)
         ball_vel = p.getBaseVelocity(self.ball_id, physicsClientId=self.client)[0]
-        
-        i = self.active_agent_idx
-        
-        # 1. Velocity Reward (Tripled!)
-        goal_direction = 1 if self.player_id == 1 else -1
-        vel_towards_goal = ball_vel[0] * goal_direction
-        
-        # BOOST: 3x stronger incentive to hit HARD
-        if vel_towards_goal > 0:
-            step_rewards[i] += vel_towards_goal * (self.reward_config['ball_velocity_scale'] * 3.0)
-
-        # 2. Spin Reward (New)
-        # Hitting well requires spinning. Reward high angular velocity of the rod.
-        # This helps the agent discover the "Kick" mechanic.
-        _, rot_id = self.agent_joints[i]
-        rot_vel = p.getJointState(self.table_id, rot_id, physicsClientId=self.client)[1]
-        
-        # Only reward spin if ball is moving forward (effective shot)
-        if vel_towards_goal > 0.1:
-            step_rewards[i] += abs(rot_vel) * 0.001
-
-        return step_rewards
-
-    def _compute_decision_rewards(self):
-        rewards = np.zeros(4)
         ball_pos = p.getBasePositionAndOrientation(self.ball_id, physicsClientId=self.client)[0]
         
         i = self.active_agent_idx
         slide_id = self.agent_joints[i][0]
         rod_pos = p.getLinkState(self.table_id, slide_id, physicsClientId=self.client)[0]
+        dist = np.linalg.norm(np.array(ball_pos[:2]) - np.array(rod_pos[:2]))
+
+        goal_direction = 1 if self.player_id == 1 else -1
+        vel_towards_goal = ball_vel[0] * goal_direction
         
+        if vel_towards_goal > 0:
+            step_rewards[i] += vel_towards_goal * (self.reward_config['ball_velocity_scale'] * 3.0)
+
+        # Spin Reward (Ungated)
+        _, rot_id = self.agent_joints[i]
+        rot_vel = p.getJointState(self.table_id, rot_id, physicsClientId=self.client)[1]
+        
+        if dist < 0.1:
+            step_rewards[i] += abs(rot_vel) * 0.01
+        
+        return step_rewards
+
+    def _compute_decision_rewards(self):
+        rewards = np.zeros(4)
+        ball_pos = p.getBasePositionAndOrientation(self.ball_id, physicsClientId=self.client)[0]
+        i = self.active_agent_idx
+        slide_id = self.agent_joints[i][0]
+        rod_pos = p.getLinkState(self.table_id, slide_id, physicsClientId=self.client)[0]
         dist = np.linalg.norm(np.array(ball_pos[:2]) - np.array(rod_pos[:2]))
         
-        # --- REMOVED DISTANCE REWARD FOR STAGE 1 ---
-        # We spawn ball at 0.02. We don't need to guide them.
-        # Rewards[i] += ... (Deleted to prevent hugging)
+        # 1. Alignment Reward (NEW)
+        # Force the agent to match Y position with ball (Tracking)
+        # rod_y is roughly slide_pos
+        current_slide = p.getJointState(self.table_id, slide_id, physicsClientId=self.client)[0]
+        # ball_y is ball_pos[1]
+        y_diff = abs(current_slide - ball_pos[1])
+        # Reward for being close in Y (max +0.1 per step)
+        rewards[i] += 0.1 * (1.0 - np.tanh(y_diff * 5.0))
         
-        # Keep First Touch Bonus (Eureka Moment)
+        # 2. Stagnation Penalty (RESTORED)
+        # Check if slide/rot changed
+        last_s = self.last_slide_pos[i]
+        if abs(current_slide - last_s) < 0.001:
+            self.slide_stagnation_counter[i] += 1
+        else:
+            self.slide_stagnation_counter[i] = 0
+        self.last_slide_pos[i] = current_slide
+        
+        # If stagnant for > 30 decision steps (1 second), punish
+        if self.slide_stagnation_counter[i] > 30:
+            rewards[i] -= 0.1
+        
+        # 3. First Touch
         if dist < 0.05 and not self.has_touched_ball[i]:
             rewards[i] += 5.0 
             self.has_touched_ball[i] = True
@@ -308,13 +302,10 @@ class FoosballEnv(gym.Env):
         ball_pos = p.getBasePositionAndOrientation(self.ball_id, physicsClientId=self.client)[0]
         terminated = False
         truncated = False
-        
         if ball_pos[0] > self.goal_line_x_2 or ball_pos[0] < self.goal_line_x_1:
             terminated = True
-            
         if self.episode_step_count >= self.max_episode_steps:
             truncated = True
-            
         return terminated, truncated
 
     def _get_obs(self):

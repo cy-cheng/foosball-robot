@@ -10,79 +10,71 @@ from foosball_utils import load_config
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default="configs/ws9.yaml")
-    # Allow user to specify which update checkpoint to load (e.g., "update_10")
-    parser.add_argument("--load_dir", type=str, required=True, help="Path to the directory containing agent checkpoints (e.g., saves/ws9/update_5)")
-    parser.add_argument("--episodes", type=int, default=5)
+    parser.add_argument("--load_dir", type=str, required=True, help="Path to checkpoint dir (e.g., saves/ws9/update_0)")
+    parser.add_argument("--episodes", type=int, default=3)
+    # Toggle this to see random movement on untrained agents
+    parser.add_argument("--stochastic", action="store_true", help="Enable random exploration (use this for Update 0!)")
     args = parser.parse_args()
 
-    # Load Config
     config = load_config(args.config)
 
     print(f"🚀 Launching Test Session")
-    print(f"   - Config: {args.config}")
-    print(f"   - Checkpoint Dir: {args.load_dir}")
-
-    # 1. Create Environment (Human Render Mode)
-    # We use 'human' to visualize the game in PyBullet GUI
+    print(f"   - Mode: {'STOCHASTIC (Random Noise)' if args.stochastic else 'DETERMINISTIC (Strict Policy)'}")
+    
     env = FoosballEnv(config, render_mode='human', curriculum_level=1)
     
-    # 2. Load the 4 Agents
     agent_roles = ["GK", "DEF", "MID", "STR"]
     agents = []
     
     print("🤖 Loading Agents...")
     for role in agent_roles:
-        model_path = f"{args.load_dir}/{role}.zip"
         try:
-            # We don't need to pass env here for inference only
-            model = PPO.load(model_path)
+            model = PPO.load(f"{args.load_dir}/{role}.zip")
             agents.append(model)
-            print(f"   ✅ Loaded {role} from {model_path}")
+            print(f"   ✅ Loaded {role}")
         except FileNotFoundError:
-            print(f"   ❌ Error: Could not find {role} agent at {model_path}")
+            print(f"   ❌ Failed to load {role}")
             return
 
-    # 3. Game Loop
     for episode in range(1, args.episodes + 1):
-        print(f"\n=== Episode {episode} ===")
-        obs, _ = env.reset() # Shape: (4, 7)
-        
+        obs, _ = env.reset()
         done = False
-        total_rewards = np.zeros(4)
-        step_count = 0
+        step = 0
+        
+        # Identify the ONE active agent for this episode (Stage 1 Curriculum)
+        active_idx = env.active_agent_idx
+        active_role = agent_roles[active_idx]
+        
+        print(f"\n=== Episode {episode} (Active Agent: {active_role}) ===")
         
         while not done:
-            # A. Get Actions from all 4 Brains
             actions_list = []
             
+            # Get actions from all 4 brains
             for i in range(4):
-                # Slice observation for specific agent
-                agent_obs = obs[i, :] 
-                
-                # Predict action (Deterministic for testing)
-                action, _state = agents[i].predict(agent_obs, deterministic=True)
+                # deterministic=False means "Add Random Noise"
+                # deterministic=True means "Output Mean (Usually 0.0 for untrained)"
+                use_deterministic = not args.stochastic
+                action, _ = agents[i].predict(obs[i], deterministic=use_deterministic)
                 actions_list.append(action)
             
-            # Stack actions: (4, 2)
             env_actions = np.stack(actions_list)
             
-            # B. Step Environment
+            # --- DEBUG: Print what the Active Agent WANTS to do ---
+            # If this prints numbers but rod doesn't move -> Physics Broken.
+            # If this prints 0.00 -> Agent is boring.
+            if step % 10 == 0: # Print every 10 steps to reduce spam
+                act = env_actions[active_idx]
+                print(f"   Step {step}: {active_role} Output -> Slide: {act[0]:.3f} | Rot: {act[1]:.3f}")
+
             obs, rewards, term, trunc, info = env.step(env_actions)
-            
-            total_rewards += rewards
-            step_count += 1
+            step += 1
             
             if term or trunc:
                 done = True
-                
-                # Basic Stats
-                print(f"   Game Over at Step {step_count}")
-                print(f"   Total Rewards: GK:{total_rewards[0]:.1f} | DEF:{total_rewards[1]:.1f} | MID:{total_rewards[2]:.1f} | STR:{total_rewards[3]:.1f}")
-                
-                if rewards[3] > 5.0: # Heuristic for scoring
-                    print("   🎉 GOAL SCORED (Likely)!")
-                elif rewards[0] < -5.0:
-                    print("   💀 GOAL CONCEDED!")
+                print(f"   🏁 Episode Finished. Total Steps: {step}")
+                if info.get('goal_scored', 0) == 1:
+                    print("   🎉 GOAL SCORED!")
 
     env.close()
 
